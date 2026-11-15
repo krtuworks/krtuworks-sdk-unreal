@@ -1,0 +1,25 @@
+# Changelog
+
+All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow semantic versioning; a breaking change is marked **Breaking**.
+
+## Unreleased
+
+## 1.0.0 - 2026-11-15
+
+First release. Unreal Engine 5.3 or later.
+
+### Added
+- The Krtuworks game instance subsystem, started with the game from `krtuworks-config.json` next to the `.uproject`; TEST in development builds, LIVE in Shipping builds; the app's type.
+- Blueprint nodes for sign-in, saves, progress, sending, remote config, bug reports and the validator, and a C++ core with no dependencies.
+- Guests with a device key, Krtuworks ID sign-in on desktops (system browser, loopback return), phones (iOS ASWebAuthenticationSession, Android browser and the app's scheme) and consoles (a code to enter at id.krtuworks.com/link).
+- Secrets in the platform's secure storage: Windows DPAPI, macOS Keychain, iOS Keychain (this device only), Android Keystore with a no-backup folder, Linux and Steam Deck sealed to the machine.
+- Steam (the KrtuworksSteam plugin): the Steam account's player, each session's licence check, achievements both ways with the Steam accounts the player allowed: the session's Steam account (`platformLink`), `OnPlatformLinkNotice` for a second account waiting for the player's answer (`answerPlatformConsent` Call operation), a third one or another Krtuworks ID's.
+- Steam Cloud mirrors the slots the console marks for it (the platform services' `cloud()`; SAVE, PROFILE and SETTINGS, never DEVICE_SETTINGS): the server is the record and Steam holds each slot's current version as `krtuworks-<slot>.bin`; whichever side moved alone goes to the other; SETTINGS take the latest; a copy nothing can order waits for the player (`OnPlatformSaveConflict`, then the `resolveFile` Call operation); a slot Steam has no room for is left alone. The `syncPlatformFiles` Call operation lines them up on demand. Only with the session's Steam account allowed and Steam Cloud on.
+- Steam stats mirror the server (the platform services' stat calls): stats with a Steam API name get the server's value, never an increase; the launch's sync imports the player's existing Steam values where the stat's kind allows; values are stored on Steam at most every 2 minutes and on pause or exit. Only with the session's Steam account allowed; achievements unlock on Steam only then too.
+- Leaderboards (the `leaderboards` module): the `SubmitScore` node (C++ `SubmitScore`, `Call` operation `submitScore`) keeps a score on the device until the server has it, like a stat (same durable queue, one id per op, a lost answer is sent again unchanged); waiting scores of a board fold by its rule (KEEP_BEST the better, FORCE_UPDATE the last); a score the server refuses for good is dropped, and one sent while the module is off waits. `GetLeaderboards` (the player's own score, details and rank) and `GetLeaderboardEntries` (global or around the player) show Krtuworks usernames. On Steam, a board that takes the platform's row in is read once per board and Steam account (the player's own row only, with the session's Steam account allowed) and sent as a score from the platform; the SDK never writes a score to Steam, the server does.
+- Steam rich presence (the `presence` module, games only): the app declares its states on the console and the game says which one is true (`SetPresence` node with a state key and its params, `Call` operation `setPresence`). When nothing is shown the answer is not a failure: `applied` is false with a `reason` (no_platform, not_game, module_disabled, hidden, unknown_state, param_missing, states_unknown or platform_rejected). LEVEL and SESSION_MINUTES fill themselves, `ClearPresence` and `SetPresenceGroup` (Steam's party display) are on the subsystem, and the player's own switch is the `SetPresenceVisible` and `PresenceVisible` nodes (off clears Steam at once and remembers the state).
+- DLC ownership (games only): C++ `ownsDlc(key)`, `entitlements()` and `refreshEntitlements()` (`Call` operations `ownsDlc {key}`, `entitlements`, `refreshEntitlements`). The server's answer for this launch comes first (its check of the session's Steam ticket); when the server could not check, the Steam client's own answer (the platform services' `ownership()`); without that, the last server answer kept on the device per player and environment.
+- Sessions, events, levels and deaths for games, stats and achievements kept on the device until the server has them, cloud saves with conflict handling, remote config, modules, A/B tests, player profile card.
+- Bug reports with a screenshot (`CaptureScreenshot`) and the "fixed" notice; profile picture reports.
+- A guest's account deletion, its cancellation and data copy from inside the game.
+- The validator (`Validate`) for the release report.

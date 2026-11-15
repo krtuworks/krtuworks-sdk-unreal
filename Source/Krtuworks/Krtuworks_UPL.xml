@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Krtuworks SDK on Android: its Java helpers in the build, kept through R8 (reached only by name, through
+  JNI), and the sign-in's return scheme com.krtuworks.<slug> on GameActivity. The slug comes from Project
+  Settings > Plugins > Krtuworks SDK (the editor copies it from krtuworks-config.json).
+-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<init>
+		<setStringFromProperty result="KrtuworksSlug" ini="Game" section="/Script/Krtuworks.KrtuworksSettings" property="AppSlug" default="" />
+		<setBoolIsEqual result="bKrtuworksNoSlug" arg1="$S(KrtuworksSlug)" arg2="" />
+		<if condition="bKrtuworksNoSlug">
+			<true>
+				<log text="Krtuworks SDK: no app slug in Project Settings (open the editor once with krtuworks-config.json next to the .uproject); the phone sign-in cannot come back." />
+			</true>
+		</if>
+	</init>
+
+	<prebuildCopies>
+		<copyDir src="$S(PluginDir)/Java" dst="$S(BuildDir)/src/com/krtuworks/sdk" />
+	</prebuildCopies>
+
+	<proguardAdditions>
+		<insert>
+-keep class com.krtuworks.sdk.** { *; }
+		</insert>
+	</proguardAdditions>
+
+	<androidManifestUpdates>
+		<if condition="bKrtuworksNoSlug">
+			<false>
+				<loopElements tag="activity">
+					<setStringFromAttribute result="KrtuworksActivity" tag="$" name="android:name" />
+					<setBoolIsEqual result="bKrtuworksGameActivity" arg1="$S(KrtuworksActivity)" arg2="com.epicgames.unreal.GameActivity" />
+					<if condition="bKrtuworksGameActivity">
+						<true>
+							<setElement result="KrtuworksFilter" value="intent-filter" />
+							<setElement result="KrtuworksAction" value="action" />
+							<addAttribute tag="$KrtuworksAction" name="android:name" value="android.intent.action.VIEW" />
+							<addElement tag="$KrtuworksFilter" name="KrtuworksAction" />
+							<setElement result="KrtuworksDefault" value="category" />
+							<addAttribute tag="$KrtuworksDefault" name="android:name" value="android.intent.category.DEFAULT" />
+							<addElement tag="$KrtuworksFilter" name="KrtuworksDefault" />
+							<setElement result="KrtuworksBrowsable" value="category" />
+							<addAttribute tag="$KrtuworksBrowsable" name="android:name" value="android.intent.category.BROWSABLE" />
+							<addElement tag="$KrtuworksFilter" name="KrtuworksBrowsable" />
+							<setElement result="KrtuworksData" value="data" />
+							<addAttribute tag="$KrtuworksData" name="android:scheme" value="com.krtuworks.$S(KrtuworksSlug)" />
+							<addElement tag="$KrtuworksFilter" name="KrtuworksData" />
+							<addElement tag="$" name="KrtuworksFilter" />
+						</true>
+					</if>
+				</loopElements>
+			</false>
+		</if>
+	</androidManifestUpdates>
+
+	<gameActivityImportAdditions>
+		<insert>
+import com.krtuworks.sdk.KrtuworksAndroid;
+		</insert>
+	</gameActivityImportAdditions>
+
+	<gameActivityOnNewIntentAdditions>
+		<insert>
+		KrtuworksAndroid.received(getIntent());
+		</insert>
+	</gameActivityOnNewIntentAdditions>
+</root>
