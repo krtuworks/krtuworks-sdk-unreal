@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -17,7 +19,7 @@ namespace krtu
 {
 /// The Steam calls the SDK makes, and no more. The Unreal Steam plugin is the real one (Steamworks);
 /// the tests give SteamAchievementSync a fake, so the decisions run without Steam.
-class SteamBackend
+class KRTU_API SteamBackend
 {
 public:
     virtual ~SteamBackend() = default;
@@ -81,7 +83,7 @@ public:
 /// web API ticket for the `krtuworks-id` identity (the Steam guest and every session's licence check), the
 /// achievements, the user stats Steam holds, the Steam Cloud files, the rich presence keys and the Steam client's own
 /// ownership answer for a DLC.
-class SteamAchievementSync : public PlatformServices, public PlatformStats, public PlatformCloud, public PlatformPresence, public PlatformOwnership
+class KRTU_API SteamAchievementSync : public PlatformServices, public PlatformStats, public PlatformCloud, public PlatformPresence, public PlatformOwnership
 {
 public:
     /// How long a ticket's answer is waited for.

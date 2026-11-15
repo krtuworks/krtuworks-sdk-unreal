@@ -1,8 +1,7 @@
-// The engine layer's own checks, run inside the engine (the Colab notebook runs them headless in the editor:
-// Automation RunTests Krtuworks). They need no Krtuworks server: what they prove is what the core's tests
-// cannot, that the engine's pieces behave as the layer assumes (text conversion, the platform's secret store,
-// the engine's HTTP module finishing a request while the game thread keeps ticking, the system browser's
-// loopback return reached through it).
+// The engine layer's own checks, run inside the engine (headless in the editor: Automation RunTests Krtuworks).
+// They need no Krtuworks server: what they prove is what the core's tests cannot, that the engine's pieces
+// behave as the layer assumes (text conversion, the platform's secret store, the engine's HTTP module finishing
+// a request while the game thread keeps ticking, the system browser's loopback return reached through it).
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -26,7 +25,9 @@
 
 namespace
 {
-	constexpr auto KrtuworksTestFlags = EAutomationTestFlags::ApplicationContextMask | EAutomationTestFlags::EngineFilter;
+	// The four contexts by name: from UE 5.6 on EAutomationTestFlags has no ApplicationContextMask member
+	constexpr auto KrtuworksTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::ServerContext
+		| EAutomationTestFlags::CommandletContext | EAutomationTestFlags::EngineFilter;
 
 	template <class T>
 	bool IsReady(const std::future<T>& Future)

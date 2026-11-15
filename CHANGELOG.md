@@ -4,6 +4,12 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.2 - 2026-11-15
+
+### Fixed
+- The plugin did not compile on Unreal Engine 5.6 and later: the language lookup used an engine type without its header, and the in-engine tests used an automation flag those versions no longer have.
+- A game's own module could not call the C++ API (`krtu::Client`, the types, the validator): the plugin did not export it, so modular builds (the editor on every platform) failed to link. The whole public C++ API is exported now.
+
 ## 1.0.1 - 2026-11-15
 
 ### Changed

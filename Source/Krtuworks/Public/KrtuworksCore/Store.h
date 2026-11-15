@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <map>
 #include <memory>
 #include <mutex>
@@ -12,7 +14,7 @@ namespace krtu
 /// Where the SDK keeps what must outlive the app: queues, the remote config, meta (a store), and the
 /// secrets (tokens, the device key) in a second store backed by the platform's secret storage. Values are
 /// JSON text. Implementations are called from several threads at once.
-class KeyValueStore
+class KRTU_API KeyValueStore
 {
 public:
     virtual ~KeyValueStore() = default;
@@ -23,7 +25,7 @@ public:
 };
 
 /// Kept in this process only (tests, tools).
-class MemoryStore : public KeyValueStore
+class KRTU_API MemoryStore : public KeyValueStore
 {
 public:
     std::optional<std::string> get(const std::string& key) override;
@@ -38,7 +40,7 @@ private:
 
 /// One folder of files as the file stores need it. The Unreal layer gives the engine's file system (a
 /// folder under the game's saved data); StdFileSystem is the plain C++ one.
-class FileSystem
+class KRTU_API FileSystem
 {
 public:
     virtual ~FileSystem() = default;
@@ -53,7 +55,7 @@ public:
 };
 
 /// A folder through std::filesystem. `directory` is UTF-8; it is made (owner-only where the system has modes).
-class StdFileSystem : public FileSystem
+class KRTU_API StdFileSystem : public FileSystem
 {
 public:
     explicit StdFileSystem(std::string directory);
@@ -68,7 +70,7 @@ private:
 
 /// The store as files: one file per key (the name is the key in base64url, so any key is a file name, never
 /// a path), written atomically.
-class FileStore : public KeyValueStore
+class KRTU_API FileStore : public KeyValueStore
 {
 public:
     explicit FileStore(std::shared_ptr<FileSystem> files);
@@ -83,7 +85,7 @@ protected:
 };
 
 /// Where the 32-byte key that seals the secret files lives (the platform's own secret storage).
-class MasterKey
+class KRTU_API MasterKey
 {
 public:
     virtual ~MasterKey() = default;
@@ -97,7 +99,7 @@ public:
 /// backup without its key) is deleted and reads as missing: the SDK starts over as a new device.
 /// When the platform does not give the key right now, nothing is deleted: reads are empty and
 /// writes are refused (`secret_storage_unavailable`) until it does.
-class SealedFileStore : public FileStore
+class KRTU_API SealedFileStore : public FileStore
 {
 public:
     SealedFileStore(std::shared_ptr<FileSystem> files, std::shared_ptr<MasterKey> master);
@@ -118,7 +120,7 @@ private:
 /// to this machine, this user and this app (`/etc/machine-id`, the uid, the app id), so sealed files copied
 /// to another machine or user do not open. A machine without a machine id keeps a random key in an
 /// owner-only file of `files` instead.
-class MachineBoundMasterKey : public MasterKey
+class KRTU_API MachineBoundMasterKey : public MasterKey
 {
 public:
     MachineBoundMasterKey(std::string appId, std::shared_ptr<FileSystem> files, std::string fallbackName = "master.key");

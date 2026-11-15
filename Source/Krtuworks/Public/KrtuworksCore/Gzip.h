@@ -2,6 +2,8 @@
 // POST /v1/events with Content-Encoding: gzip, and the engine-independent core cannot link zlib.
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -15,5 +17,5 @@ std::uint32_t crc32(std::string_view data) noexcept;
 /// Every block is the smallest of stored, fixed Huffman and dynamic Huffman, so incompressible input
 /// grows by about 5 bytes per 64 KiB plus the 18 bytes of header and trailer. No shared state: safe to
 /// call from any thread.
-std::string gzip(std::string_view data);
+KRTU_API std::string gzip(std::string_view data);
 }  // namespace krtu

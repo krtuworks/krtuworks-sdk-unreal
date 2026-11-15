@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,7 +11,7 @@
 namespace krtu
 {
 /// One of the validator's checks: PASSED, FAILED or SKIPPED.
-struct ValidationCheck
+struct KRTU_API ValidationCheck
 {
     std::string key;
     std::string title;
@@ -18,7 +20,7 @@ struct ValidationCheck
     std::optional<std::string> detail;
 };
 
-struct ValidationReport
+struct KRTU_API ValidationReport
 {
     /// No check failed.
     bool ok = false;
@@ -26,7 +28,7 @@ struct ValidationReport
     std::vector<ValidationCheck> checks;
 };
 
-struct ValidateOptions
+struct KRTU_API ValidateOptions
 {
     /// A web build signs in with the app's web client.
     bool web = false;
@@ -44,12 +46,12 @@ struct ValidateOptions
 /// this run turns its report green. `options` are the game's own (config, platform, build, stores, transport);
 /// the run is always in TEST and uses those stores, so the same TEST guest comes back run after run. A run right
 /// after another waits out the slot's write limit (one write per 10 seconds). Blocks; never throws.
-ValidationReport validate(const Options& options, const ValidateOptions& settings = ValidateOptions());
+KRTU_API ValidationReport validate(const Options& options, const ValidateOptions& settings = ValidateOptions());
 
 /// What is wrong with krtuworks-config.json for this platform (a web build reads the web client), if anything.
-std::vector<std::string> configProblems(const AppConfig& config, const std::string& platform, bool web);
+KRTU_API std::vector<std::string> configProblems(const AppConfig& config, const std::string& platform, bool web);
 /// What is wrong with the platform, if anything: a known one, and Steam with its Steamworks services.
-std::vector<std::string> platformProblems(const std::string& platform, bool hasPlatformServices);
+KRTU_API std::vector<std::string> platformProblems(const std::string& platform, bool hasPlatformServices);
 /// A send's verdict: sent, or left this device with no refusal (nothing); otherwise why it was not.
-std::optional<std::string> sentOrWhy(int sent, int waiting, const std::optional<std::string>& stoppedBy);
+KRTU_API std::optional<std::string> sentOrWhy(int sent, int waiting, const std::optional<std::string>& stoppedBy);
 }  // namespace krtu

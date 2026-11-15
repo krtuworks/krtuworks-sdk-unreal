@@ -2,6 +2,8 @@
 // alone (the core links no JSON library and includes no engine header).
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -20,7 +22,7 @@ namespace krtu
 /// members in insertion order and dump() writes compact, deterministic text: a stored queue is parsed
 /// and written again before it is resent, and the server hashes a frozen batch, so the same value must
 /// always become the same bytes.
-class Json
+class KRTU_API Json
 {
 public:
     /// The JSON kinds. Integers and doubles are both Number.

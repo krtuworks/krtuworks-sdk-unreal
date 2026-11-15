@@ -4,6 +4,7 @@
 #include "GeneralProjectSettings.h"
 #include "GenericPlatform/GenericApplication.h"
 #include "HAL/FileManager.h"
+#include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "KrtuworksConvert.h"
 #include "KrtuworksCore/Store.h"

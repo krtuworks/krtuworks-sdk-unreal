@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <atomic>
 #include <exception>
 #include <memory>
@@ -14,7 +16,7 @@ namespace krtu
 /// OAuth `error`) or one of the SDK's own: `network_error` (no answer), `context_changed` (the player
 /// changed while the call ran; its answer was dropped), `signed_out`, `birth_date_required`.
 /// Wrong arguments from the game are std::invalid_argument instead, a wrong setup std::logic_error.
-class Error : public std::exception
+class KRTU_API Error : public std::exception
 {
 public:
     Error(std::string code, std::string message, int status = 0, std::optional<double> retryAfter = std::nullopt, Json details = Json::object());
@@ -43,14 +45,14 @@ private:
 };
 
 /// A wait the caller cancelled through its CancelToken (a sign-in the player closed, the app stopping).
-class Cancelled : public std::exception
+class KRTU_API Cancelled : public std::exception
 {
 public:
     const char* what() const noexcept override { return "cancelled"; }
 };
 
 /// A flag the caller sets to stop a long wait (a sign-in in the browser, a console's code). Copies share the flag.
-class CancelToken
+class KRTU_API CancelToken
 {
 public:
     CancelToken() : flag_(std::make_shared<std::atomic<bool>>(false)) {}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -21,7 +23,7 @@ namespace krtu
 /// (krtuworks-sdk-js/src/client.ts) and the Unity package with the native sign-ins (system browser + loopback, a
 /// phone's own scheme, a console's code, Steam). Every call blocks until it is done and may be made from any
 /// thread; the Unreal layer runs them off the game thread and hands the results back to it.
-class Client
+class KRTU_API Client
 {
 public:
     /// The terms a new guest accepts on the age screen (Krtuworks ID Terms + Privacy, the versions this SDK shows).

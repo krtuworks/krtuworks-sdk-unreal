@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -9,7 +11,7 @@
 namespace krtu
 {
 /// HTTP headers by name in any case (kept lowercase), one value each.
-class Headers
+class KRTU_API Headers
 {
 public:
     void set(std::string_view name, std::string value);
@@ -23,7 +25,7 @@ private:
 };
 
 /// One HTTP request as the SDK makes it.
-struct HttpCall
+struct KRTU_API HttpCall
 {
     std::string method = "GET";
     std::string url;
@@ -33,7 +35,7 @@ struct HttpCall
 };
 
 /// One HTTP answer: status, headers and the raw body.
-struct HttpAnswer
+struct KRTU_API HttpAnswer
 {
     int status = 0;
     Headers headers;
@@ -45,7 +47,7 @@ struct HttpAnswer
 /// How the SDK talks HTTP. send() blocks until the answer is complete and is called from the SDK's own
 /// threads, never from the game thread; the Unreal layer implements it with the engine's HTTP module.
 /// A failure to get any answer throws krtu::Error("network_error").
-class HttpTransport
+class KRTU_API HttpTransport
 {
 public:
     virtual ~HttpTransport() = default;
@@ -53,7 +55,7 @@ public:
 };
 
 /// `text` percent-encoded the way URIs want it (RFC 3986 unreserved characters kept).
-std::string urlEncode(std::string_view text);
+KRTU_API std::string urlEncode(std::string_view text);
 /// `text` with %XX decoded and, when `plusIsSpace`, `+` read as a space (form and query encoding).
-std::string urlDecode(std::string_view text, bool plusIsSpace);
+KRTU_API std::string urlDecode(std::string_view text, bool plusIsSpace);
 }  // namespace krtu

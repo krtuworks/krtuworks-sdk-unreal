@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KrtuworksCore/Export.h"
+
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -19,7 +21,7 @@
 namespace krtu
 {
 /// One environment's sign-in clients in `krtuworks-config.json`.
-struct EnvironmentClients
+struct KRTU_API EnvironmentClients
 {
     /// The native sign-in client (desktop, mobile, Steam): `<slug>.<env>.native`.
     std::optional<std::string> clientId;
@@ -30,7 +32,7 @@ struct EnvironmentClients
 
 /// `krtuworks-config.json`, downloaded from the app's "Credentials" page: nothing secret, only who the app
 /// is, what kind of app it is and its players' sign-in clients per environment.
-struct AppConfig
+struct KRTU_API AppConfig
 {
     std::string appId;
     std::string slug;
@@ -44,7 +46,7 @@ struct AppConfig
 };
 
 /// What the session tells about the device; only the known fields are sent.
-struct DeviceInfo
+struct KRTU_API DeviceInfo
 {
     std::optional<std::string> os;
     std::optional<std::string> osVersion;
@@ -70,7 +72,7 @@ enum class PlatformScoreRead
 
 /// The platform's stats, the optional half of what a platform gives the SDK: the server is the record and the
 /// SDK sets the platform to the server's values (Steam's user stats). Called from the SDK's threads.
-class PlatformStats
+class KRTU_API PlatformStats
 {
 public:
     virtual ~PlatformStats() = default;
@@ -87,7 +89,7 @@ public:
 };
 
 /// A file in the platform's cloud.
-struct PlatformCloudFile
+struct KRTU_API PlatformCloudFile
 {
     std::string data;
     /// When it was last written, Unix seconds; 0 when the platform does not tell.
@@ -97,7 +99,7 @@ struct PlatformCloudFile
 /// The platform's per-player cloud (Steam Cloud), the optional half of what a platform gives the SDK: the SDK
 /// mirrors the app's mirrored slots there (the server is the record; only a slot's current version is on the
 /// platform). Called from the SDK's threads.
-class PlatformCloud
+class KRTU_API PlatformCloud
 {
 public:
     virtual ~PlatformCloud() = default;
@@ -115,7 +117,7 @@ public:
 /// The platform client's own answer to "does the player own this product", the optional half of what a platform gives
 /// the SDK (Steam's `BIsSubscribedApp` for a DLC's AppID). The server's answer comes first; this one stands in when the
 /// server did not check in this launch. Called from the SDK's threads.
-class PlatformOwnership
+class KRTU_API PlatformOwnership
 {
 public:
     virtual ~PlatformOwnership() = default;
@@ -124,7 +126,7 @@ public:
 };
 
 /// One licence of the player in this app: the game itself (sku `base`) or one of its DLCs (the DLC's product key).
-struct Entitlement
+struct KRTU_API Entitlement
 {
     std::string sku;
     std::string source;
@@ -139,7 +141,7 @@ struct Entitlement
 
 /// The platform's rich presence, the optional half of what a platform gives the SDK: the text friends see about
 /// what the player is doing (Steam's rich presence keys). Called from the SDK's threads, one write at a time.
-class PlatformPresence
+class KRTU_API PlatformPresence
 {
 public:
     virtual ~PlatformPresence() = default;
@@ -151,7 +153,7 @@ public:
 
 /// What Client::setPresence did. `reason` says why `applied` is false: no_platform, not_game, module_disabled,
 /// hidden, unknown_state, param_missing, states_unknown or platform_rejected.
-struct PresenceResult
+struct KRTU_API PresenceResult
 {
     bool applied = false;
     std::string reason;
@@ -159,7 +161,7 @@ struct PresenceResult
 
 /// What a platform gives the SDK. The Steam module implements
 /// it; a platform without one passes nothing. Called from the SDK's threads.
-class PlatformServices
+class KRTU_API PlatformServices
 {
 public:
     virtual ~PlatformServices() = default;
@@ -183,7 +185,7 @@ public:
     virtual void clearAchievement(const std::string& platformId) = 0;
 };
 
-struct Options
+struct KRTU_API Options
 {
     AppConfig config;
     /// TEST or LIVE.
@@ -221,7 +223,7 @@ enum class PlayerKind
     Account
 };
 
-struct Player
+struct KRTU_API Player
 {
     PlayerKind kind = PlayerKind::Guest;
     /// The id this app knows the player by: the same on every device, never the Krtuworks ID itself.
@@ -231,7 +233,7 @@ struct Player
 };
 
 /// signed_in · guest · signed_out · merged · deletion_pending · sanctioned
-struct IdentityChange
+struct KRTU_API IdentityChange
 {
     std::string type;
     std::optional<Player> player;
@@ -243,7 +245,7 @@ struct IdentityChange
 };
 
 /// A console's sign-in: show userCode and verificationUri (or a QR of the complete one).
-struct DeviceLink
+struct KRTU_API DeviceLink
 {
     std::string userCode;
     std::string verificationUri;
@@ -254,14 +256,14 @@ struct DeviceLink
 };
 
 /// The owner's switch for a build: `TELEMETRY` stops the statistics, `ALL` stops every call (the game shows the message).
-struct BuildSwitch
+struct KRTU_API BuildSwitch
 {
     std::string build;
     std::string mode;
     std::string message;
 };
 
-struct Gate
+struct KRTU_API Gate
 {
     bool maintenance = false;
     std::optional<std::string> maintenanceMessage;
@@ -270,7 +272,7 @@ struct Gate
     std::optional<BuildSwitch> switchedOff;
 };
 
-struct StatView
+struct KRTU_API StatView
 {
     std::string key;
     std::string name;
@@ -286,7 +288,7 @@ struct StatView
     static StatView fromJson(const Json& json);
 };
 
-struct AchievementView
+struct KRTU_API AchievementView
 {
     std::string key;
     std::string id;
@@ -303,7 +305,7 @@ struct AchievementView
     static AchievementView fromJson(const Json& json);
 };
 
-struct ProgressView
+struct KRTU_API ProgressView
 {
     std::optional<std::string> locale;
     std::vector<StatView> stats;
@@ -313,7 +315,7 @@ struct ProgressView
 };
 
 /// A stat, achievement or score op the server refused for good (it left the queue).
-struct ProgressRefusal
+struct KRTU_API ProgressRefusal
 {
     /// `stat`, `unlock` or `score`.
     std::string type;
@@ -321,7 +323,7 @@ struct ProgressRefusal
     std::string code;
 };
 
-struct ProgressFlushResult
+struct KRTU_API ProgressFlushResult
 {
     int applied = 0;
     std::optional<std::string> stoppedBy;
@@ -329,7 +331,7 @@ struct ProgressFlushResult
     std::map<std::string, double> values;
 };
 
-struct FlushResult
+struct KRTU_API FlushResult
 {
     int sent = 0;
     std::vector<std::pair<std::string, std::string>> rejected;
@@ -337,7 +339,7 @@ struct FlushResult
     std::optional<std::string> stoppedBy;
 };
 
-struct BugDropped
+struct KRTU_API BugDropped
 {
     std::string reportId;
     std::string code;
@@ -345,7 +347,7 @@ struct BugDropped
     bool screenshotOnly = false;
 };
 
-struct BugFlushResult
+struct KRTU_API BugFlushResult
 {
     int sent = 0;
     /// Reports or screenshots the server refused for good; they are not sent again.
@@ -353,14 +355,14 @@ struct BugFlushResult
     std::optional<std::string> stoppedBy;
 };
 
-struct SendResult
+struct KRTU_API SendResult
 {
     ProgressFlushResult progress;
     BugFlushResult bugs;
     FlushResult events;
 };
 
-struct PlatformSyncResult
+struct KRTU_API PlatformSyncResult
 {
     std::vector<std::string> unlockedHere;
     std::vector<std::string> toPlatform;
@@ -373,7 +375,7 @@ struct PlatformSyncResult
 };
 
 /// A leaderboard of the app with the player's own standing.
-struct LeaderboardView
+struct KRTU_API LeaderboardView
 {
     std::string key;
     std::string name;
@@ -400,7 +402,7 @@ struct LeaderboardView
 };
 
 /// One row of a leaderboard.
-struct LeaderboardEntry
+struct KRTU_API LeaderboardEntry
 {
     /// Competition rank: equal scores share one.
     std::int64_t rank = 0;
@@ -418,7 +420,7 @@ struct LeaderboardEntry
 };
 
 /// A page of a leaderboard's rows in its order.
-struct LeaderboardPage
+struct KRTU_API LeaderboardPage
 {
     std::string key;
     /// `global` or `around`.
@@ -431,14 +433,14 @@ struct LeaderboardPage
     static LeaderboardPage fromJson(const Json& json);
 };
 
-struct WaitingCounts
+struct KRTU_API WaitingCounts
 {
     int events = 0;
     int progress = 0;
     int bugReports = 0;
 };
 
-struct Experiment
+struct KRTU_API Experiment
 {
     std::string key;
     std::string configKey;
@@ -448,7 +450,7 @@ struct Experiment
     static Experiment fromJson(const Json& json);
 };
 
-struct PlayerProfile
+struct KRTU_API PlayerProfile
 {
     Json::Members fields;
     std::optional<std::string> updatedAt;
@@ -457,7 +459,7 @@ struct PlayerProfile
 };
 
 /// Where an event happened: a world position (x, y, z in a scene) or a screen position.
-struct EventPosition
+struct KRTU_API EventPosition
 {
     /// `world` or `screen`.
     std::string space = "world";
@@ -472,7 +474,7 @@ struct EventPosition
 };
 
 /// A level, with its world and part when the game has those layers.
-struct LevelRef
+struct KRTU_API LevelRef
 {
     std::string level;
     std::optional<std::string> world;
@@ -480,7 +482,7 @@ struct LevelRef
 };
 
 /// A bug report from the player (the categories are a fixed menu).
-struct BugReportInput
+struct KRTU_API BugReportInput
 {
     /// CRASH, GAMEPLAY, GRAPHICS, AUDIO, PERFORMANCE, CONTROLS, TEXT or OTHER.
     std::string category = "OTHER";
@@ -496,7 +498,7 @@ struct BugReportInput
 };
 
 /// A report as its player sees it: never the notes, the assignee or the labels.
-struct BugReportView
+struct KRTU_API BugReportView
 {
     std::string id;
     std::string category;
@@ -514,7 +516,7 @@ struct BugReportView
     static BugReportView fromJson(const Json& json);
 };
 
-struct FileVersion
+struct KRTU_API FileVersion
 {
     std::string id;
     std::string slot;
@@ -532,7 +534,7 @@ struct FileVersion
     static FileVersion fromJson(const Json& json);
 };
 
-struct SlotView
+struct KRTU_API SlotView
 {
     std::string key;
     /// SAVE, PROFILE, SETTINGS or DEVICE_SETTINGS.
@@ -553,7 +555,7 @@ struct SlotView
 /// (the first time this device compares them, or both moved): it waits on the server for the player's choice. The
 /// game shows both (times, sizes, its own summary of `platformData`) and calls Client::resolveFile with the one to
 /// keep and `server.id`; the kept bytes then go to both sides.
-struct PlatformSaveConflict
+struct KRTU_API PlatformSaveConflict
 {
     std::string slot;
     /// The slot's current version.
@@ -564,7 +566,7 @@ struct PlatformSaveConflict
     std::optional<std::string> platformData;
 };
 
-struct SlotList
+struct KRTU_API SlotList
 {
     std::vector<SlotView> slots;
     std::map<std::string, std::int64_t> limits;
@@ -572,7 +574,7 @@ struct SlotList
     static SlotList fromJson(const Json& json);
 };
 
-struct FileRead
+struct KRTU_API FileRead
 {
     std::string bytes;
     /// A save of this slot started on this device while the read ran: the read is older than what the player has here.
@@ -587,13 +589,13 @@ struct FileRead
 };
 
 /// DEVICE_SETTINGS: this device's id and description, so a new device starts from the closest one's.
-struct SaveDevice
+struct KRTU_API SaveDevice
 {
     std::string id;
     std::map<std::string, std::string> info;
 };
 
-struct ResumedUpload
+struct KRTU_API ResumedUpload
 {
     std::string uploadId;
     std::string slot;
@@ -602,14 +604,14 @@ struct ResumedUpload
     std::optional<std::string> code;
 };
 
-struct WaitingSave
+struct KRTU_API WaitingSave
 {
     std::string uploadId;
     std::string slot;
     std::int64_t savedAt = 0;
 };
 
-struct MergeSettlement
+struct KRTU_API MergeSettlement
 {
     std::string previousSubject;
     /// Saves the merged account left waiting on this device: the player chooses (adoptWaitingSave / discardWaitingSave).
@@ -620,7 +622,7 @@ struct MergeSettlement
 /// (mirrored), PENDING_CONSENT (a second Steam account: ask the player, then Client::answerPlatformConsent),
 /// REFUSED (the player said no), LIMIT (a third account; a game mirrors with two at most), MISMATCH (another
 /// Krtuworks ID mirrors with it here).
-struct PlatformLink
+struct KRTU_API PlatformLink
 {
     std::string platform;
     /// The player's own platform account (SteamID) the session proved.
@@ -628,7 +630,7 @@ struct PlatformLink
     std::string state;
 };
 
-struct SessionInfo
+struct KRTU_API SessionInfo
 {
     std::string id;
     /// The player the session is for.
