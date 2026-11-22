@@ -456,8 +456,13 @@ void Identity::markMergedLocked(const std::string& previousSubject, const std::o
     auto current = meta();
     identityAddWaiting(current, previousSubject);
     saveMeta(current);
-    adopt(std::nullopt);
-    emit(IdentityChange{"merged", std::nullopt, false, false, std::nullopt, previousSubject, mergedInto});
+    // A late answer for a player who already left must not sign out the one who plays now.
+    const auto stored = loadTokens();
+    if (stored && stored->subject == previousSubject)
+    {
+        adopt(std::nullopt);
+        emit(IdentityChange{"merged", std::nullopt, false, false, std::nullopt, previousSubject, mergedInto});
+    }
     throw Error("account_merged", "This account was merged into another one; sign in with it.", 401, std::nullopt, Json::object({{"mergedInto", orNull(mergedInto)}}));
 }
 

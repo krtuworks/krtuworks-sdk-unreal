@@ -25,6 +25,9 @@ public:
     bool foreground() const;
     /// Seconds in use in this launch (foreground only).
     std::int64_t activeSeconds() const;
+    /// Seconds in use since the current session began (foreground only): what the session reports. A session
+    /// opened after another one (a new player, a timeout) starts from zero, not from the launch's total.
+    std::int64_t sessionActiveSeconds() const;
     void setForeground(bool foreground);
     /// Opens the player's session if there is none (one at a time).
     std::optional<SessionInfo> open();
@@ -49,6 +52,8 @@ private:
     /// The server's `platformLink` (the session open's, the consent answer's); empty when it is not one.
     std::optional<SessionInfo> doOpen();
     std::int64_t elapsedMs() const;
+    /// Under `mutex_`.
+    std::int64_t launchActiveMsLocked() const;
 
     const Resolved& opts_;
     Api& api_;
@@ -63,6 +68,8 @@ private:
     std::int64_t nextHeartbeatAt_ = 0;
     std::int64_t activeMs_ = 0;
     std::optional<std::int64_t> activeSince_;
+    /// The launch's time in use when the current session began: the server counts only what follows.
+    std::int64_t sessionBaseMs_ = 0;
     std::mutex openMutex_;
     std::function<void(const Json&)> onEntitlements_;
 };

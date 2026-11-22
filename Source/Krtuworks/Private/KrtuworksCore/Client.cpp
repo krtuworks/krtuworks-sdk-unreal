@@ -78,7 +78,7 @@ struct Client::Impl
                   const auto place = levels.inPlay();
                   return place ? std::optional<std::string>(place->level) : std::nullopt;
               },
-              [this] { return sessions.activeSeconds(); }, [this](const std::string& line) { bugs.log(line); }),
+              [this] { return sessions.sessionActiveSeconds(); }, [this](const std::string& line) { bugs.log(line); }),
           licences(options, api, *store, ownershipPlatform(), [this] { return subject(); }),
           backgroundLoop(o.backgroundLoop),
           started(std::chrono::steady_clock::now())

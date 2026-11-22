@@ -1,7 +1,7 @@
 #include "Sessions.h"
 
+#include <algorithm>
 #include <exception>
-
 #include <limits>
 
 namespace krtu::detail
@@ -36,10 +36,21 @@ bool SessionKeeper::foreground() const
     return activeSince_.has_value();
 }
 
+std::int64_t SessionKeeper::launchActiveMsLocked() const
+{
+    return activeMs_ + (activeSince_ ? elapsedMs() - *activeSince_ : 0);
+}
+
 std::int64_t SessionKeeper::activeSeconds() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return (activeMs_ + (activeSince_ ? elapsedMs() - *activeSince_ : 0)) / 1000;
+    return launchActiveMsLocked() / 1000;
+}
+
+std::int64_t SessionKeeper::sessionActiveSeconds() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return (std::max)(static_cast<std::int64_t>(0), launchActiveMsLocked() - sessionBaseMs_) / 1000;
 }
 
 void SessionKeeper::setForeground(bool foreground)
@@ -74,7 +85,12 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
             clientSessionId_.reset();
             nextHeartbeatAt_ = sessionsNever;
         }
-        if (!clientSessionId_) clientSessionId_ = uuidV4();
+        if (!clientSessionId_)
+        {
+            // A new session (not an open sent again after a lost answer): its time in use starts now.
+            clientSessionId_ = uuidV4();
+            sessionBaseMs_ = launchActiveMsLocked();
+        }
         clientSessionId = *clientSessionId_;
     }
     auto body = Json::object({{"clientSessionId", clientSessionId}, {"platform", opts_.platform}, {"build", opts_.build}});
@@ -154,7 +170,7 @@ void SessionKeeper::heartbeat()
     {
         PlayerCall call;
         call.method = "POST";
-        call.json = Json::object({{"activeSeconds", activeSeconds()}, {"foreground", foreground()}});
+        call.json = Json::object({{"activeSeconds", sessionActiveSeconds()}, {"foreground", foreground()}});
         call.owner = current->owner;
         const auto answer = api_.player("/v1/sessions/" + current->id + "/heartbeat", call);
         const auto next = answer.body().getInt("nextHeartbeatSeconds");
@@ -194,7 +210,7 @@ void SessionKeeper::round()
     {
         PlayerCall call;
         call.method = "POST";
-        call.json = Json::object({{"activeSeconds", activeSeconds()}, {"foreground", foreground()}});
+        call.json = Json::object({{"activeSeconds", sessionActiveSeconds()}, {"foreground", foreground()}});
         call.owner = current->owner;
         api_.player("/v1/sessions/" + current->id + "/heartbeat", call);
     }
@@ -202,7 +218,7 @@ void SessionKeeper::round()
     {
         failure = err;
     }
-    const auto active = activeSeconds();
+    const auto active = sessionActiveSeconds();
     close();
     PlayerCall call;
     call.method = "POST";
@@ -222,7 +238,7 @@ void SessionKeeper::round()
 void SessionKeeper::end()
 {
     const auto current = session();
-    const auto active = activeSeconds();
+    const auto active = sessionActiveSeconds();
     close();
     if (!current) return;
     try
