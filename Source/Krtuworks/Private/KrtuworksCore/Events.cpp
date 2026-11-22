@@ -225,14 +225,45 @@ void EventQueue::move(const std::string& from, const std::string& to)
     auto secondLock = NamedLocks::take(key(second));
     auto source = load(from);
     if (source.pending.empty() && !source.batch && source.dropped == source.reported) return;
-    auto target = load(to);
-    if (source.batch)
+    // The dropped count leaves the source before it reaches the target: a move cut short between the writes
+    // loses it rather than says it twice.
+    const auto unsaid = source.dropped - source.reported;
+    if (unsaid > 0)
     {
-        if (target.batch) target.pending.insert(target.pending.begin(), source.batch->events.begin(), source.batch->events.end());
-        else target.batch = source.batch;
+        source.reported = source.dropped;
+        save(from, source);
     }
-    target.pending.insert(target.pending.end(), source.pending.begin(), source.pending.end());
-    target.dropped += source.dropped - source.reported;
+    auto target = load(to);
+    // A move run again after it was cut short brings events the target holds already: they go once.
+    std::set<std::string> held;
+    for (const auto& e : target.pending) held.insert(e.id);
+    if (target.batch)
+    {
+        for (const auto& e : target.batch->events) held.insert(e.id);
+    }
+    const auto fresh = [&held](const std::vector<WireEvent>& events) {
+        std::vector<WireEvent> out;
+        for (const auto& e : events)
+        {
+            if (held.count(e.id) == 0) out.push_back(e);
+        }
+        return out;
+    };
+    if (source.batch && (!target.batch || source.batch->batchId != target.batch->batchId))
+    {
+        if (target.batch)
+        {
+            const auto events = fresh(source.batch->events);
+            target.pending.insert(target.pending.begin(), events.begin(), events.end());
+        }
+        else
+        {
+            target.batch = source.batch;
+        }
+    }
+    const auto events = fresh(source.pending);
+    target.pending.insert(target.pending.end(), events.begin(), events.end());
+    target.dropped += (std::max)(static_cast<std::int64_t>(0), unsaid);
     trim(target);
     save(to, target);
     store_.remove(key(from));
@@ -349,6 +380,7 @@ std::string EventQueue::sendBatch(const std::string& owner, const FrozenBatch& b
         call.body = std::move(body);
         call.headers.set("content-type", "application/json");
         call.headers.set("content-encoding", "gzip");
+        call.owner = owner;
         answer = api_.player("/v1/events", call);
     }
     catch (const Error& err)

@@ -333,15 +333,21 @@ void Identity::adopt(const std::optional<StoredTokens>& next)
 
 std::string Identity::accessToken(bool force)
 {
+    return credentials(force).accessToken;
+}
+
+Credentials Identity::credentials(bool force)
+{
     StoredTokens t;
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         if (!tokens_) throw identitySignedOut();
         t = *tokens_;
     }
-    if (!force && t.accessExpiresAt - identityRefreshEarlyMs > clock_.serverNowMs()) return t.accessToken;
+    if (!force && t.accessExpiresAt - identityRefreshEarlyMs > clock_.serverNowMs()) return Credentials{t.accessToken, t.subject};
     const auto used = t.accessToken;
-    return refreshing_.run([this, &used] { return refresh(used); }).accessToken;
+    const auto next = refreshing_.run([this, &used] { return refresh(used); });
+    return Credentials{next.accessToken, next.subject};
 }
 
 Answer Identity::token(FormFields fields, const std::string& path, const std::optional<std::string>& clientId)

@@ -599,7 +599,7 @@ struct KRTU_API ResumedUpload
 {
     std::string uploadId;
     std::string slot;
-    /// saved, refused or waiting.
+    /// saved, refused, waiting, or replaced (a newer save of the slot took its place).
     std::string outcome;
     std::optional<std::string> code;
 };

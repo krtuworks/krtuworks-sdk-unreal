@@ -316,8 +316,9 @@ ValidationReport validate(const Options& options, const ValidateOptions& setting
                 if (options.delay) options.delay(ms, CancelToken());
                 else std::this_thread::sleep_for(ms);
                 std::vector<ResumedUpload> resent;
+                // An older save of this slot left by another run is replaced by this one; only this one's outcome counts.
                 for (const auto& u : k.resumeFiles())
-                    if (u.slot == slot->key) resent.push_back(u);
+                    if (u.slot == slot->key && u.outcome != "replaced") resent.push_back(u);
                 const auto refused = std::find_if(resent.begin(), resent.end(), [](const ResumedUpload& u) { return u.outcome != "saved"; });
                 if (refused != resent.end() || resent.empty())
                     return check("cloud_save", "FAILED", refused != resent.end() ? refused->code.value_or("not sent") : std::string("not sent"));

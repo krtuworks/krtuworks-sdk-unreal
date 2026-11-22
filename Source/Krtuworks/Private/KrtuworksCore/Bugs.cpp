@@ -271,6 +271,7 @@ BugFlushResult BugReports::flush()
                 PlayerCall post;
                 post.method = "POST";
                 post.json = w["body"];
+                post.owner = *player;
                 const auto answer = api_.player("/v1/me/bug-reports", post);
                 const auto bugId = answer.body()["report"].getString("id");
                 if (!bugId) throw Error("invalid_answer", "The server answered without the report.");
@@ -282,6 +283,7 @@ BugFlushResult BugReports::flush()
                 const auto& shot = w["screenshot"];
                 PlayerCall put;
                 put.method = "PUT";
+                put.owner = *player;
                 put.body = fromBase64(shot.getString("bytes").value_or(""));
                 put.headers.set("content-type", shot.getString("type").value_or("image/png"));
                 try

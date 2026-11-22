@@ -82,6 +82,13 @@ struct DeviceKey
     static std::optional<DeviceKey> fromJson(const Json& json);
 };
 
+/// An access token together with the player it belongs to, read from the same stored tokens.
+struct Credentials
+{
+    std::string accessToken;
+    std::string subject;
+};
+
 /// A JWT's claims, unverified: the SDK reads its own tokens, the servers judge them.
 Json jwtClaims(const std::string& token);
 
@@ -120,6 +127,10 @@ public:
 
     /// A valid access token, refreshed first when it is about to expire (or `force`). One refresh at a time.
     std::string accessToken(bool force = false);
+    /// The access token with the player it belongs to, taken from one copy of the stored tokens under the state
+    /// lock: a refresh may hand back another player's tokens (another instance on the same store signed in
+    /// meanwhile), and only the pair says whose.
+    Credentials credentials(bool force = false);
     /// The server said the player's account went into another one (401 account_merged). Always throws account_merged.
     [[noreturn]] void markMerged(const std::string& previousSubject, const std::optional<std::string>& mergedInto);
 

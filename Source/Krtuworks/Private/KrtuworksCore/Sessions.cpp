@@ -87,6 +87,7 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
     PlayerCall call;
     call.method = "POST";
     call.json = body;
+    call.owner = *owner;
     const auto answer = api_.player("/v1/sessions", call);
     const auto& session = answer.body()["session"];
     if (!session.isObject() || subject_() != owner) return std::nullopt;
@@ -154,6 +155,7 @@ void SessionKeeper::heartbeat()
         PlayerCall call;
         call.method = "POST";
         call.json = Json::object({{"activeSeconds", activeSeconds()}, {"foreground", foreground()}});
+        call.owner = current->owner;
         const auto answer = api_.player("/v1/sessions/" + current->id + "/heartbeat", call);
         const auto next = answer.body().getInt("nextHeartbeatSeconds");
         if (next && *next > 0)
@@ -193,6 +195,7 @@ void SessionKeeper::round()
         PlayerCall call;
         call.method = "POST";
         call.json = Json::object({{"activeSeconds", activeSeconds()}, {"foreground", foreground()}});
+        call.owner = current->owner;
         api_.player("/v1/sessions/" + current->id + "/heartbeat", call);
     }
     catch (const Error& err)
@@ -204,6 +207,7 @@ void SessionKeeper::round()
     PlayerCall call;
     call.method = "POST";
     call.json = Json::object({{"activeSeconds", active}});
+    call.owner = current->owner;
     try
     {
         api_.player("/v1/sessions/" + current->id + "/end", call);
@@ -226,6 +230,7 @@ void SessionKeeper::end()
         PlayerCall call;
         call.method = "POST";
         call.json = Json::object({{"activeSeconds", active}});
+        call.owner = current->owner;
         api_.player("/v1/sessions/" + current->id + "/end", call);
     }
     catch (const Error&)

@@ -117,9 +117,12 @@ public:
     void importScore(const std::string& key, std::int64_t value);
     /// How many ops wait for `owner` (in flight or not yet frozen).
     int waiting(const std::string& owner);
-    /// Moves `from`'s waiting progress to `to` (the first player after anon play, or a merge target). Frozen
-    /// ops keep their ids: one the server already applied under the old account answers `duplicate` under the
-    /// new one (the merge moved its receipt), so nothing counts twice.
+    /// Moves `from`'s waiting progress to `to` (the first player after anon play, or a merge target).
+    /// Everything that waits for `from` is first frozen into ops with ids and written back; only then do the
+    /// ops move, and an op the target already holds is not added again. The target and the source are two
+    /// writes: a move cut short between them (the app closed, the delete failed) and run again brings the
+    /// same ids, so nothing is added twice. One the server already applied under the old account answers
+    /// `duplicate` under the new one (the merge moved its receipt).
     void move(const std::string& from, const std::string& to);
     /// Sends the signed-in player's ops until nothing waits or a send fails. Answers per op: applied and
     /// duplicate end the op; a refusal for good ends it too (and everything waiting for a stat, achievement or
@@ -141,6 +144,8 @@ private:
     std::optional<std::string> kindOf(const std::string& statKey) const;
     std::optional<BoardRule> ruleOf(const std::string& boardKey) const;
     std::vector<FrozenOp> freeze(ProgressState& state) const;
+    /// Freezes everything that waits in `state` into ops with ids (a move's first step); whether anything was.
+    bool freezeAll(ProgressState& state) const;
 
     const Resolved& opts_;
     KeyValueStore& store_;

@@ -376,31 +376,49 @@ void ProgressQueue::move(const std::string& from, const std::string& to)
     auto firstLock = NamedLocks::take(key(first));
     auto secondLock = NamedLocks::take(key(second));
     auto source = load(from);
+    if (freezeAll(source)) save(from, source);
     auto target = load(to);
-    for (auto& s : source.stats)
-    {
-        auto& t = target.stats[s.first];
-        t.inFlight.insert(t.inFlight.end(), s.second.inFlight.begin(), s.second.inFlight.end());
-        auto merged = s.second.pending;
-        merged.insert(merged.end(), t.pending.begin(), t.pending.end());
-        t.pending = fold(merged, kindOf(s.first));
-    }
-    for (auto& u : source.unlocks)
+    const auto add = [](std::vector<FrozenOp>& into, const std::vector<FrozenOp>& ops) {
+        for (const auto& op : ops)
+        {
+            const auto held = std::any_of(into.begin(), into.end(), [&op](const FrozenOp& h) { return h.opId == op.opId; });
+            if (!held) into.push_back(op);
+        }
+    };
+    for (const auto& s : source.stats) add(target.stats[s.first].inFlight, s.second.inFlight);
+    for (const auto& u : source.unlocks)
     {
         auto& t = target.unlocks[u.first];
-        t.inFlight.insert(t.inFlight.end(), u.second.inFlight.begin(), u.second.inFlight.end());
-        t.pending = t.pending || (u.second.pending && t.inFlight.empty());
+        add(t.inFlight, u.second.inFlight);
+        if (!t.inFlight.empty()) t.pending = false;
     }
-    for (auto& b : source.scores)
-    {
-        auto& t = target.scores[b.first];
-        t.inFlight.insert(t.inFlight.end(), b.second.inFlight.begin(), b.second.inFlight.end());
-        auto merged = b.second.pending;
-        merged.insert(merged.end(), t.pending.begin(), t.pending.end());
-        t.pending = foldScores(merged, ruleOf(b.first));
-    }
+    for (const auto& b : source.scores) add(target.scores[b.first].inFlight, b.second.inFlight);
     save(to, target);
     store_.remove(key(from));
+}
+
+bool ProgressQueue::freezeAll(ProgressState& state) const
+{
+    bool frozen = false;
+    for (auto& s : state.stats)
+    {
+        for (const auto& c : fold(s.second.pending, kindOf(s.first))) s.second.inFlight.push_back(FrozenOp{uuidV7(), "stat", s.first, c.value, std::nullopt, false});
+        frozen = frozen || !s.second.pending.empty();
+        s.second.pending.clear();
+    }
+    for (auto& u : state.unlocks)
+    {
+        if (u.second.pending && u.second.inFlight.empty()) u.second.inFlight.push_back(FrozenOp{uuidV7(), "unlock", u.first, std::nullopt, std::nullopt, false});
+        frozen = frozen || u.second.pending;
+        u.second.pending = false;
+    }
+    for (auto& b : state.scores)
+    {
+        for (const auto& c : foldScores(b.second.pending, ruleOf(b.first))) b.second.inFlight.push_back(FrozenOp{uuidV7(), "score", b.first, c.value, c.details, c.fromPlatform});
+        frozen = frozen || !b.second.pending.empty();
+        b.second.pending.clear();
+    }
+    return frozen;
 }
 
 std::vector<FrozenOp> ProgressQueue::freeze(ProgressState& state) const
@@ -474,6 +492,7 @@ ProgressFlushResult ProgressQueue::flush()
             PlayerCall call;
             call.method = "POST";
             call.json = Json::object({{"platform", opts_.platform}, {"build", opts_.build}, {"ops", progressOpsJson(ops)}});
+            call.owner = *owner;
             answer = api_.player("/v1/me/progress", call);
         }
         catch (const Error& err)

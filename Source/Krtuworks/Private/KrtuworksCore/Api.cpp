@@ -43,26 +43,37 @@ Answer Api::open(const std::string& path, const PlayerCall& call)
 Answer Api::player(const std::string& path, const PlayerCall& call)
 {
     const auto generation = identity_.generation();
-    const auto current = identity_.player();
-    auto answer = attempt(path, call, false);
+    std::string owner;
+    if (call.owner)
+    {
+        owner = *call.owner;
+    }
+    else
+    {
+        const auto current = identity_.player();
+        if (!current) throw Error("signed_out", "No player is signed in.");
+        owner = current->subject;
+    }
+    auto answer = attempt(path, call, false, owner);
     if (answer.status == 401)
     {
         const auto err = wire::errorOf(answer);
-        if (err.code() == "account_merged" && current) identity_.markMerged(current->subject, err.details().getString("mergedInto"));
-        if (err.code() == "token_expired" || err.code() == "token_revoked" || err.code() == "invalid_token") answer = attempt(path, call, true);
+        if (err.code() == "account_merged") identity_.markMerged(owner, err.details().getString("mergedInto"));
+        if (err.code() == "token_expired" || err.code() == "token_revoked" || err.code() == "invalid_token") answer = attempt(path, call, true, owner);
     }
     if (identity_.generation() != generation) throw Error("context_changed", "The player changed while the call ran; its answer was dropped.");
     if ((answer.status >= 300 || answer.status < 200) && !apiAccepted(call, answer.status)) throw wire::errorOf(answer);
     return answer;
 }
 
-Answer Api::attempt(const std::string& path, const PlayerCall& call, bool forceRefresh)
+Answer Api::attempt(const std::string& path, const PlayerCall& call, bool forceRefresh, const std::string& owner)
 {
-    const auto token = identity_.accessToken(forceRefresh);
+    const auto credentials = identity_.credentials(forceRefresh);
+    if (credentials.subject != owner) throw Error("context_changed", "The player changed while the call ran; it was dropped.");
     HttpCall request;
     request.method = call.method;
     request.url = url(path, call.query);
-    request.headers.set("authorization", "Bearer " + token);
+    request.headers.set("authorization", "Bearer " + credentials.accessToken);
     request.headers.set("x-krtu-build", opts_.build);
     for (const auto& header : call.headers.all()) request.headers.set(header.first, header.second);
     if (call.body) request.body = *call.body;

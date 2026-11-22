@@ -104,7 +104,7 @@ void CloudMirror::syncOnce(const std::string& owner, const std::string& account,
         {
             // The slot moved meanwhile, a write still settling, the server away: the next sync compares again.
             // Refused for good (too big, over the player's quota, the link): left alone for the session.
-            if (!err.retryable() && err.code() != "file_conflict" && err.code() != "upload_pending")
+            if (!err.retryable() && err.code() != "file_conflict" && err.code() != "upload_pending" && err.code() != "save_replaced")
             {
                 leftAlone_.insert(slot.key);
                 problem_("platform_" + err.code(), slot.key);
