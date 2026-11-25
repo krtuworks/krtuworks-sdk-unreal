@@ -302,6 +302,9 @@ private:
     };
     struct AgeOutcome;
 
+    std::optional<std::string> playerSubject() const;
+    /// The player who opened a save screen is the one who answers it; otherwise their bytes or choice would reach another account.
+    void assertSamePlayer(const std::optional<std::string>& owner) const;
     Player signInBrowser(const CancelToken& external);
     Player signInDevice(const CancelToken& external);
     UiResult failOffline(const ErrorScreen& screen);

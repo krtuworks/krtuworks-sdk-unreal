@@ -39,7 +39,10 @@ public final class KrtuworksKeystore {
         return generator.generateKey();
     }
 
-    /** base64(iv | ciphertext) of `secret`, or null when the Keystore cannot (Android before 6.0, or a refusal). */
+    /**
+     * base64(iv | ciphertext) of `secret`, or null when the Keystore cannot (Android before 6.0, or a refusal). A null is
+     * not final: the caller keeps the key as plain text meanwhile and calls this again on every launch until it seals.
+     */
     public static String seal(String secret) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null;
         try {

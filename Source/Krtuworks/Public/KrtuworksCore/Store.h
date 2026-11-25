@@ -2,6 +2,7 @@
 
 #include "KrtuworksCore/Export.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -131,4 +132,16 @@ private:
     std::shared_ptr<FileSystem> files_;
     std::string fallbackName_;
 };
+/// Marks an Android key kept as it is because sealing failed (or Android before 6.0 cannot seal): the folder is still
+/// private and never backed up. Temporary: every launch seals it again once the Keystore works, so it stays plain only
+/// where sealing never works.
+inline constexpr const char* keystorePlainPrefix = "plain:";
+
+/// The Android key file's decisions, apart from the JNI bridge so they run without Android: open the kept key, upgrade
+/// a `plain:` one, or make a new one. `open` and `seal` are KrtuworksKeystore's: open answers nothing when the Keystore
+/// failed just now and "" when the text can never open here; seal answers nothing when it cannot seal. Nothing is
+/// returned when the Keystore failed while opening (a new key would orphan every sealed secret).
+KRTU_API std::optional<std::string> resolveKeystoreKey(FileSystem& files, const std::string& name,
+                                                       const std::function<std::optional<std::string>(const std::string&)>& open,
+                                                       const std::function<std::optional<std::string>(const std::string&)>& seal);
 }  // namespace krtu

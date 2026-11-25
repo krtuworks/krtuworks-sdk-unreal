@@ -85,12 +85,10 @@ namespace
 		return Result;
 	}
 
-	/** Marks a key kept as it is: Android before 6.0 has no Keystore AES (the folder is still private and never backed up). */
-	const std::string PlainPrefix = "plain:";
-
 	/**
 	 * The sealing key encrypted by the Keystore (KrtuworksKeystore.java), kept in the no-backup folder. Restored
-	 * onto another phone it cannot be opened, so the SDK starts as a new device.
+	 * onto another phone it cannot be opened, so the SDK starts as a new device. Where sealing fails the key is
+	 * kept as `plain:` text and sealed on a later launch (krtu::resolveKeystoreKey).
 	 */
 	class FKeystoreMasterKey : public krtu::MasterKey
 	{
@@ -99,35 +97,10 @@ namespace
 
 		std::optional<std::string> getOrCreate() override
 		{
-			if (const std::optional<std::string> Kept = Folder->read("secrets.key"))
-			{
-				std::optional<std::string> Opened;
-				if (Kept->compare(0, PlainPrefix.size(), PlainPrefix) == 0)
-				{
-					Opened = Kept->substr(PlainPrefix.size());
-				}
-				else
-				{
-					Opened = CallStringWithText(KeystoreClass(), "open", *Kept);
-				}
-				// Nothing: the Keystore failed just now. Making a new key would orphan every sealed secret; wait instead.
-				if (!Opened)
-				{
-					return std::nullopt;
-				}
-				if (!Opened->empty())
-				{
-					return krtu::fromBase64(*Opened);
-				}
-			}
-			const std::string Key = krtu::randomBytes(32);
-			std::optional<std::string> Sealed = CallStringWithText(KeystoreClass(), "seal", krtu::base64(Key));
-			if (!Sealed || Sealed->empty())
-			{
-				Sealed = PlainPrefix + krtu::base64(Key);
-			}
-			Folder->writeAtomic("secrets.key", *Sealed, true);
-			return Key;
+			return krtu::resolveKeystoreKey(
+				*Folder, "secrets.key",
+				[](const std::string& Text) { return CallStringWithText(KeystoreClass(), "open", Text); },
+				[](const std::string& Secret) { return CallStringWithText(KeystoreClass(), "seal", Secret); });
 		}
 
 	private:

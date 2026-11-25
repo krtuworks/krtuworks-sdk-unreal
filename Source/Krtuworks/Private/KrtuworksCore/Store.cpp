@@ -292,4 +292,43 @@ std::optional<std::string> MachineBoundMasterKey::getOrCreate()
     }
     return std::nullopt;
 }
+
+// ── The Android key file ────────────────────────────────────────────────
+
+std::optional<std::string> resolveKeystoreKey(FileSystem& files, const std::string& name,
+                                              const std::function<std::optional<std::string>(const std::string&)>& open,
+                                              const std::function<std::optional<std::string>(const std::string&)>& seal)
+{
+    const std::string plainPrefix = keystorePlainPrefix;
+    if (const auto kept = files.read(name))
+    {
+        const bool plain = kept->compare(0, plainPrefix.size(), plainPrefix) == 0;
+        const std::optional<std::string> opened = plain ? std::optional<std::string>(kept->substr(plainPrefix.size())) : open(*kept);
+        if (!opened) return std::nullopt;
+        if (!opened->empty())
+        {
+            if (plain)
+            {
+                // The same key, sealed now; the file stays as it was when sealing still fails or it cannot be written.
+                const auto sealedKey = seal(*opened);
+                if (sealedKey && !sealedKey->empty())
+                {
+                    try
+                    {
+                        files.writeAtomic(name, *sealedKey, true);
+                    }
+                    catch (const std::exception&)
+                    {
+                    }
+                }
+            }
+            return fromBase64(*opened);
+        }
+    }
+    const std::string key = randomBytes(32);
+    const std::string encoded = base64(key);
+    const auto sealedKey = seal(encoded);
+    files.writeAtomic(name, sealedKey && !sealedKey->empty() ? *sealedKey : plainPrefix + encoded, true);
+    return key;
+}
 }  // namespace krtu

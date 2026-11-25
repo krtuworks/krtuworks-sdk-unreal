@@ -293,7 +293,15 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Async(EAsyncExecution::Thread, [Slot, Conflict]() {
 			if (const std::shared_ptr<krtu::UiController> Ui = Slot->Get())
 			{
-				Ui->resolvePlatformSaveConflict(Conflict);
+				// Nobody waits on this thread: an error escaping it would end the game.
+				try
+				{
+					Ui->resolvePlatformSaveConflict(Conflict);
+				}
+				catch (const std::exception& Err)
+				{
+					UE_LOG(LogKrtuworks, Warning, TEXT("Krtuworks SDK: the Steam Cloud save choice did not go through: %s"), UTF8_TO_TCHAR(Err.what()));
+				}
 			}
 		});
 	});

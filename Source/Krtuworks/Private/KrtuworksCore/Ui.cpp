@@ -658,15 +658,29 @@ SaveCard UiController::card(const std::string& label, const std::string& savedAt
     return made;
 }
 
+std::optional<std::string> UiController::playerSubject() const
+{
+    const auto player = client_->player();
+    if (!player) return std::nullopt;
+    return player->subject;
+}
+
+void UiController::assertSamePlayer(const std::optional<std::string>& owner) const
+{
+    if (playerSubject() != owner) throw Error("context_changed", "The player changed while the save screen was open; nothing was saved.");
+}
+
 SaveChoice UiController::chooseSave(const std::string& slot, const std::string& bytes, const FileVersion& current, const std::string& name)
 {
     std::lock_guard<std::recursive_mutex> lock(flow_);
     FileVersion seen = current;
+    const auto owner = playerSubject();
     try
     {
         for (;;)
         {
             const auto read = client_->readFile(slot);
+            assertSamePlayer(owner);
             if (!read || !read->versionId)
             {
                 SaveChoice saved;
@@ -691,6 +705,7 @@ SaveChoice UiController::chooseSave(const std::string& slot, const std::string& 
             screen.slot = name.empty() ? slot : name;
             screen.cards = {hereCard, thereCard};
             const UiAnswer answer = once(screen);
+            assertSamePlayer(owner);
             if (answer.kind == UiAnswerKind::Keep && answer.card == 1)
             {
                 SaveChoice kept;
@@ -722,12 +737,16 @@ std::vector<ResolvedSave> UiController::resolveMergedSaves()
 {
     std::lock_guard<std::recursive_mutex> lock(flow_);
     std::vector<ResolvedSave> out;
+    const auto owner = playerSubject();
     try
     {
-        for (const SlotView& slot : client_->listFiles().slots)
+        const auto listed = client_->listFiles();
+        assertSamePlayer(owner);
+        for (const SlotView& slot : listed.slots)
         {
             if (!slot.conflict || !slot.file) continue;
             const auto read = client_->readFile(slot.key);
+            assertSamePlayer(owner);
             const FileVersion& waiting = *slot.conflict;
             const std::string waitingLabel = waiting.platformCloud ? t("conflict.cloud", {{"platform", platformName(*waiting.platformCloud)}}) : t("conflict.merged");
             SaveCard currentCard = card(t("conflict.current"), slot.file->savedAt, slot.file->sizeBytes, slot.key, read ? std::optional<std::string>(read->bytes) : std::nullopt);
@@ -742,6 +761,7 @@ std::vector<ResolvedSave> UiController::resolveMergedSaves()
             screen.slot = slot.name.empty() ? slot.key : slot.name;
             screen.cards = {currentCard, waitingCard};
             const UiAnswer answer = once(screen);
+            assertSamePlayer(owner);
             const FileVersion& keep = answer.kind == UiAnswerKind::Keep && answer.card == 1 ? waiting : *slot.file;
             out.push_back({slot.key, client_->resolveFile(slot.key, keep.id, slot.file->id)});
         }
@@ -756,10 +776,15 @@ std::vector<ResolvedSave> UiController::resolveMergedSaves()
 void UiController::resolvePlatformSaveConflict(const PlatformSaveConflict& conflict)
 {
     if (!options_.platformSaveConflicts) return;
+    // The copy belongs to the player it was found for: another player never sees it nor answers it (the copy
+    // keeps waiting on the server for its player).
+    const auto owner = playerSubject();
     std::lock_guard<std::recursive_mutex> lock(flow_);
     try
     {
+        if (playerSubject() != owner) return;
         const auto read = client_->readFile(conflict.slot);
+        if (playerSubject() != owner) return;
         const std::string platform = conflict.platform.platformCloud.value_or(conflict.platform.platform.value_or(""));
         SaveCard serverCard = card(t("conflict.current"), conflict.server.savedAt, conflict.server.sizeBytes, conflict.slot, read ? std::optional<std::string>(read->bytes) : std::nullopt);
         SaveCard platformCard = card(t("conflict.cloud", {{"platform", platformName(platform)}}), conflict.platform.savedAt, conflict.platform.sizeBytes, conflict.slot, conflict.platformData);
@@ -773,6 +798,7 @@ void UiController::resolvePlatformSaveConflict(const PlatformSaveConflict& confl
         screen.slot = conflict.slot;
         screen.cards = {serverCard, platformCard};
         const UiAnswer answer = once(screen);
+        if (playerSubject() != owner) return;
         const FileVersion& keep = answer.kind == UiAnswerKind::Keep && answer.card == 1 ? conflict.platform : conflict.server;
         client_->resolveFile(conflict.slot, keep.id, conflict.server.id);
     }
