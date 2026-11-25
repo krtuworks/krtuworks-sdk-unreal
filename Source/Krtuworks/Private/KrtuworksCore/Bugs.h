@@ -50,7 +50,7 @@ public:
     std::string report(const BugReportInput& input, const std::optional<std::string>& level);
     /// Reports (with their screenshots) that wait on this device for the player, or for the first player.
     int waiting();
-    /// Hands one owner's waiting reports to another (the anonymous queue to the first player, a confirmed merge).
+    /// Hands one owner's waiting reports and history to another (the anonymous queue to the first player, a confirmed merge).
     void move(const std::string& from, const std::string& to);
     BugFlushResult flush();
     /// The player's reports in this app and environment, newest first; fixes not told yet are told.
@@ -72,10 +72,26 @@ private:
     /// Tells the game a fix; false when no one listens (the fix then waits for the next look).
     std::function<bool(const BugReportView&)> fixedTold_;
     std::mutex mutex_;
-    std::vector<Json> events_;
-    std::vector<std::string> logLines_;
+    /// The history is kept with the owner it was made under; a report takes only its own owner's.
+    struct NotedEvent
+    {
+        std::string owner;
+        Json entry;
+    };
+    struct NotedLine
+    {
+        std::string owner;
+        std::string line;
+    };
+    struct NotedFps
+    {
+        std::string owner;
+        double fps = 0;
+    };
+    std::vector<NotedEvent> events_;
+    std::vector<NotedLine> logLines_;
     std::size_t logBytes_ = 0;
-    std::optional<double> lastFps_;
+    std::optional<NotedFps> lastFps_;
     /// Reports that wait before their next try (in memory: a new launch tries them all again).
     std::map<std::string, std::int64_t> waitUntil_;
 };

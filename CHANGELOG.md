@@ -4,6 +4,14 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.7 - 2026-11-25
+
+### Fixed
+- A bug report carries only its own player's recent events, log lines and frame rate. Before, after a switch to another account in the same run, the new player's report took the previous player's events and log lines too. What was recorded before anyone signed in goes to the first player, like the events queue.
+- A different player signed in by another tab or instance sharing the same storage is now taken up like a sign-in here: the identity change is reported and a session opens for that player. Before, the SDK switched to that player silently. A plain token refresh by another tab stays silent.
+- The log a bug report attaches is now also limited by its size in the request, so a log full of control characters can no longer push a report over the server's size limit.
+- On iOS, a second sign-in started while the first was still open ends the first one as cancelled. Before, the first call could wait forever, and its later cancel could close the second sign-in's page.
+
 ## 1.0.6 - 2026-11-25
 
 ### Fixed

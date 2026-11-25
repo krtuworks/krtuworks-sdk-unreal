@@ -175,6 +175,8 @@ private:
     void adopt(const std::optional<StoredTokens>& next);
     Answer token(FormFields fields, const std::string& path = "/oidc/token", const std::optional<std::string>& clientId = std::nullopt);
     StoredTokens tokensFrom(const Answer& answer, const std::string& kind, const std::optional<StoredTokens>& previous, const std::string& via = "oidc") const;
+    /// Tokens another instance wrote for a different player are taken up like a sign-in here: the app and the client are told.
+    void adoptFromAnotherInstance(const StoredTokens& stored);
     StoredTokens refresh(const std::string& usedAccess);
     StoredTokens refused(const StoredTokens& stored, const Error& err);
     [[noreturn]] void markMergedLocked(const std::string& previousSubject, const std::optional<std::string>& mergedInto);

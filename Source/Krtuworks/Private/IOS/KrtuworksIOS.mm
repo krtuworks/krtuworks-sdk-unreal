@@ -113,7 +113,10 @@ namespace
 		NSString* Service;
 	};
 
-	/** The one sign-in session the app has open, and the answer it is waiting for. */
+	/**
+	 * One sign-in call: its own waiter and its own native session. Session and Presenter are touched on the main
+	 * thread only; the waiter fields are guarded by Mutex. The first Finish wins, later ones are ignored.
+	 */
 	struct FIosSignIn
 	{
 		std::mutex Mutex;
@@ -121,6 +124,23 @@ namespace
 		bool bFinished = false;
 		std::string Address;
 		std::string Failure;
+		ASWebAuthenticationSession* Session = nil;
+		id Presenter = nil;
+
+		void Finish(const std::string& InAddress, const std::string& InFailure)
+		{
+			{
+				std::lock_guard<std::mutex> Lock(Mutex);
+				if (bFinished)
+				{
+					return;
+				}
+				Address = InAddress;
+				Failure = InFailure;
+				bFinished = true;
+			}
+			Done.notify_all();
+		}
 	};
 }
 
@@ -149,8 +169,8 @@ API_AVAILABLE(ios(13.0))
 }
 @end
 
-static ASWebAuthenticationSession* GKrtuworksSession = nil;
-static id GKrtuworksPresenter = nil;
+// The call that currently owns the open sign-in page. Main thread only.
+static std::shared_ptr<FIosSignIn> GKrtuworksActive;
 
 namespace KrtuworksPlatform
 {
@@ -180,46 +200,44 @@ namespace KrtuworksPlatform
 		NSURL* Target = [NSURL URLWithString:IosString(Url)];
 		NSString* CallbackScheme = IosString(Scheme);
 		dispatch_async(dispatch_get_main_queue(), ^{
-			[GKrtuworksSession cancel];
-			__block __weak ASWebAuthenticationSession* Started = nil;
+			// A newer sign-in replaces the open one: the replaced call ends as cancelled instead of hanging.
+			if (GKrtuworksActive)
+			{
+				const std::shared_ptr<FIosSignIn> Previous = GKrtuworksActive;
+				GKrtuworksActive.reset();
+				[Previous->Session cancel];
+				Previous->Session = nil;
+				Previous->Finish("", "cancelled");
+			}
 			ASWebAuthenticationSession* Session = [[ASWebAuthenticationSession alloc] initWithURL:Target callbackURLScheme:CallbackScheme completionHandler:^(NSURL* Callback, NSError* Error) {
-				// A session replaced by a newer one answers late (its cancel): that answer is not the newer one's.
-				if (GKrtuworksSession == nil || GKrtuworksSession != Started)
+				// Every session answers its own call only, however late (a replaced session answers with its cancel).
+				if (GKrtuworksActive == Wait)
 				{
-					return;
+					GKrtuworksActive.reset();
 				}
-				GKrtuworksSession = nil;
+				Wait->Session = nil;
+				if (Callback != nil)
 				{
-					std::lock_guard<std::mutex> Lock(Wait->Mutex);
-					if (Callback != nil)
-					{
-						Wait->Address = Callback.absoluteString.UTF8String;
-					}
-					else
-					{
-						Wait->Failure = Error.code == ASWebAuthenticationSessionErrorCodeCanceledLogin ? "cancelled" : std::to_string(static_cast<long>(Error.code));
-					}
-					Wait->bFinished = true;
+					Wait->Finish(Callback.absoluteString.UTF8String, "");
 				}
-				Wait->Done.notify_all();
+				else
+				{
+					Wait->Finish("", Error.code == ASWebAuthenticationSessionErrorCodeCanceledLogin ? "cancelled" : std::to_string(static_cast<long>(Error.code)));
+				}
 			}];
-			Started = Session;
-			GKrtuworksSession = Session;
+			Wait->Session = Session;
+			GKrtuworksActive = Wait;
 			if (@available(iOS 13.0, *))
 			{
-				GKrtuworksPresenter = [KrtuworksAuthPresenter new];
-				Session.presentationContextProvider = GKrtuworksPresenter;
+				Wait->Presenter = [KrtuworksAuthPresenter new];
+				Session.presentationContextProvider = Wait->Presenter;
 				Session.prefersEphemeralWebBrowserSession = NO;
 			}
 			if (![Session start])
 			{
-				GKrtuworksSession = nil;
-				{
-					std::lock_guard<std::mutex> Lock(Wait->Mutex);
-					Wait->Failure = "start_failed";
-					Wait->bFinished = true;
-				}
-				Wait->Done.notify_all();
+				GKrtuworksActive.reset();
+				Wait->Session = nil;
+				Wait->Finish("", "start_failed");
 			}
 		});
 		std::unique_lock<std::mutex> Lock(Wait->Mutex);
@@ -229,8 +247,12 @@ namespace KrtuworksPlatform
 			{
 				Lock.unlock();
 				dispatch_async(dispatch_get_main_queue(), ^{
-					[GKrtuworksSession cancel];
-					GKrtuworksSession = nil;
+					if (GKrtuworksActive == Wait)
+					{
+						GKrtuworksActive.reset();
+					}
+					[Wait->Session cancel];
+					Wait->Session = nil;
 				});
 				throw krtu::Cancelled();
 			}

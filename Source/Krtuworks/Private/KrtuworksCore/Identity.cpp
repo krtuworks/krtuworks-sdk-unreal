@@ -383,6 +383,18 @@ StoredTokens Identity::tokensFrom(const Answer& answer, const std::string& kind,
     return t;
 }
 
+void Identity::adoptFromAnotherInstance(const StoredTokens& stored)
+{
+    const auto changed = [&] {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        return !tokens_ || tokens_->subject != stored.subject;
+    }();
+    adopt(stored);
+    if (!changed) return;
+    const auto made = playerOf(stored);
+    emit(IdentityChange{made.kind == PlayerKind::Guest ? "guest" : "signed_in", made, false, false, std::nullopt, std::nullopt, std::nullopt});
+}
+
 StoredTokens Identity::refresh(const std::string& usedAccess)
 {
     auto lock = NamedLocks::take(lockName());
@@ -395,8 +407,12 @@ StoredTokens Identity::refresh(const std::string& usedAccess)
     if (stored->accessToken != usedAccess && stored->accessExpiresAt - identityRefreshEarlyMs > clock_.serverNowMs())
     {
         // Another instance on the same store refreshed already: its answer is used, the token is not spent twice.
-        adopt(stored);
+        adoptFromAnotherInstance(*stored);
         return *stored;
+    }
+    {
+        const auto current = player();
+        if (!current || current->subject != stored->subject) adoptFromAnotherInstance(*stored);
     }
     if (!stored->refreshToken)
     {

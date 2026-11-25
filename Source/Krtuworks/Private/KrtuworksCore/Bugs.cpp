@@ -20,6 +20,8 @@ constexpr std::size_t bugsEventChars = 1800;
 /// The server takes at most 100 KB of events; the SDK's own part stays under it so it never costs the player's report.
 constexpr std::size_t bugsEventsChars = 90000;
 constexpr std::size_t bugsLogBytes = 32768;
+/// The server's JSON body limit is 256 KiB: the log as written into the body (control characters take six bytes each) also stays under a budget, next to the events' 90 KB.
+constexpr std::size_t bugsLogBodyBytes = 90000;
 constexpr std::size_t bugsLogLine = 1000;
 constexpr std::int64_t bugsRetryMs = 60000;
 constexpr std::size_t bugsToldKept = 200;
@@ -132,7 +134,14 @@ Json BugReports::reportBody(const BugReportInput& input, const std::string& repo
         if (kept.dump().size() <= bugsEventsChars) break;
     }
     if (start < events.size() && !kept.empty()) body["events"] = std::move(kept);
-    if (!log.empty()) body["log"] = log;
+    // The log keeps its newest lines.
+    std::string keptLog = log;
+    while (!keptLog.empty() && Json(keptLog).dump().size() > bugsLogBodyBytes)
+    {
+        const auto cut = keptLog.find('\n');
+        keptLog = cut == std::string::npos ? std::string() : keptLog.substr(cut + 1);
+    }
+    if (!keptLog.empty()) body["log"] = keptLog;
     return body;
 }
 
@@ -173,25 +182,27 @@ void BugReports::noteEvent(const WireEvent& event)
     auto entry = Json::object({{"type", event.type}, {"at", event.createdAt}});
     if (event.position) entry["position"] = event.position->toJson();
     if (event.data && event.data->dump().size() <= bugsEventChars) entry["data"] = *event.data;
+    const auto who = owner_();
     std::lock_guard<std::mutex> lock(mutex_);
-    events_.push_back(std::move(entry));
+    events_.push_back(NotedEvent{who, std::move(entry)});
     if (events_.size() > bugsRingEvents) events_.erase(events_.begin());
     if (event.type == "performance" && event.data)
     {
         const auto fps = event.data->getNumber("fps");
-        if (fps && bugsFinite(*fps)) lastFps_ = *fps;
+        if (fps && bugsFinite(*fps)) lastFps_ = NotedFps{who, *fps};
     }
 }
 
 void BugReports::log(const std::string& message)
 {
     const auto line = isoNow() + " " + bugsCut(message, bugsLogLine);
+    const auto who = owner_();
     std::lock_guard<std::mutex> lock(mutex_);
-    logLines_.push_back(line);
+    logLines_.push_back(NotedLine{who, line});
     logBytes_ += line.size() + 1;
     while (logBytes_ > bugsLogBytes && !logLines_.empty())
     {
-        logBytes_ -= logLines_.front().size() + 1;
+        logBytes_ -= logLines_.front().line.size() + 1;
         logLines_.erase(logLines_.begin());
     }
 }
@@ -214,9 +225,11 @@ std::string BugReports::report(const BugReportInput& input, const std::optional<
     std::optional<double> fps;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        recent = events_;
-        fps = lastFps_;
-        for (std::size_t i = 0; i < logLines_.size(); ++i) logText += (i ? "\n" : "") + logLines_[i];
+        for (const auto& e : events_)
+            if (e.owner == who) recent.push_back(e.entry);
+        if (lastFps_ && lastFps_->owner == who) fps = lastFps_->fps;
+        for (const auto& l : logLines_)
+            if (l.owner == who) logText += (logText.empty() ? "" : "\n") + l.line;
     }
     auto body = reportBody(input, reportId, opts_, level, fps, recent, logText);
     auto waiting = Json::object({{"reportId", reportId}, {"madeAt", nowMs()}, {"body", std::move(body)}});
@@ -235,6 +248,14 @@ int BugReports::waiting()
 void BugReports::move(const std::string& from, const std::string& to)
 {
     if (from == to) return;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& e : events_)
+            if (e.owner == from) e.owner = to;
+        for (auto& l : logLines_)
+            if (l.owner == from) l.owner = to;
+        if (lastFps_ && lastFps_->owner == from) lastFps_->owner = to;
+    }
     for (const auto& key : store_.keys(prefix(from)))
     {
         const auto w = getJson(store_, key);
