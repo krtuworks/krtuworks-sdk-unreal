@@ -6,6 +6,7 @@
 #include "HAL/FileManager.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
+#include "Kismet/GameplayStatics.h"
 #include "KrtuworksConvert.h"
 #include "KrtuworksCore/Store.h"
 #include "KrtuworksCore/Validator.h"
@@ -14,6 +15,8 @@
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Ui/KrtuworksUiHost.h"
+#include "Ui/KrtuworksUiLook.h"
 #include "UnrealHttpTransport.h"
 
 #include <chrono>
@@ -81,6 +84,54 @@ namespace
 			return "TEST";
 #endif
 		}
+	}
+
+	bool IsConsole()
+	{
+		const FString Name = UGameplayStatics::GetPlatformName();
+		return Name == FString(TEXT("PS4")) || Name == FString(TEXT("PS5")) || Name == FString(TEXT("XboxOne")) || Name == FString(TEXT("XSX")) || Name == FString(TEXT("Switch"));
+	}
+
+	/** The mode the settings say; consoles sign in with a code, iOS and Android with the system sheet, everything else with the browser. */
+	krtu::UiSignInMode ResolveSignInMode(EKrtuworksSignInMode Mode)
+	{
+		switch (Mode)
+		{
+		case EKrtuworksSignInMode::Browser:
+			return krtu::UiSignInMode::Browser;
+		case EKrtuworksSignInMode::App:
+			return krtu::UiSignInMode::App;
+		case EKrtuworksSignInMode::Device:
+			return krtu::UiSignInMode::Device;
+		case EKrtuworksSignInMode::None:
+			return krtu::UiSignInMode::None;
+		default:
+			if (KrtuworksPlatform::SignsInOnPhone())
+			{
+				return krtu::UiSignInMode::App;
+			}
+			return IsConsole() ? krtu::UiSignInMode::Device : krtu::UiSignInMode::Browser;
+		}
+	}
+
+	FKrtuworksScreenResult ToScreenResult(const krtu::UiResult& Result)
+	{
+		FKrtuworksScreenResult Out;
+		Out.bSignedIn = Result.status == krtu::UiStatus::SignedIn;
+		Out.bCancelled = Result.status == krtu::UiStatus::Cancelled;
+		if (Result.status == krtu::UiStatus::Offline)
+		{
+			Out.OfflineReason = Result.reason == krtu::UiOfflineReason::Underage ? TEXT("underage") : TEXT("unavailable");
+		}
+		Out.Player = KrtuworksConvert::ToPlayer(Result.player);
+		return Out;
+	}
+
+	FKrtuworksScreenResult Unavailable()
+	{
+		FKrtuworksScreenResult Out;
+		Out.OfflineReason = TEXT("unavailable");
+		return Out;
 	}
 
 	/** The SDK's own folder under the game's saved data, as an absolute UTF-8 path. */
@@ -163,6 +214,7 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Options.environment = EnvironmentOf(Settings);
 		const std::string Root = SdkFolder();
 		Options.store = std::make_shared<krtu::FileStore>(std::make_shared<krtu::StdFileSystem>(Root + "/store"));
+		UiStore = Options.store;
 		Options.secrets = KrtuworksPlatform::MakeSecretStore(Root, Options.config.appId);
 		Options.http = std::make_shared<FUnrealHttpTransport>();
 		Options.device = DeviceDescription();
@@ -179,6 +231,8 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		return;
 	}
 	UE_LOG(LogKrtuworks, Log, TEXT("Krtuworks SDK started (%s, %s)."), *ToFString(Client->appType()), *ToFString(Client->environment()));
+
+	BuildUi();
 
 	TWeakObjectPtr<UKrtuworksSubsystem> Self(this);
 	Client->setIdentityChangedHandler([Self](const krtu::IdentityChange& Change) {
@@ -197,11 +251,19 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			}
 		});
 	});
-	Client->setLinkReminderHandler([Self](const std::string& Reason) {
+	const std::shared_ptr<FKrtuworksUiSlot> Slot = UiSlot;
+	Client->setLinkReminderHandler([Self, Slot](const std::string& Reason) {
 		AsyncTask(ENamedThreads::GameThread, [Self, Converted = ToFString(Reason)]() {
 			if (Self.IsValid())
 			{
 				Self->OnLinkReminder.Broadcast(Converted);
+			}
+		});
+		// The ready-made corner prompt waits for the player's answer: not on the SDK's thread.
+		Async(EAsyncExecution::Thread, [Slot]() {
+			if (const std::shared_ptr<krtu::UiController> Ui = Slot->Get())
+			{
+				Ui->remind();
 			}
 		});
 	});
@@ -221,11 +283,17 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			}
 		});
 	});
-	Client->setPlatformSaveConflictHandler([Self](const krtu::PlatformSaveConflict& Conflict) {
+	Client->setPlatformSaveConflictHandler([Self, Slot](const krtu::PlatformSaveConflict& Conflict) {
 		AsyncTask(ENamedThreads::GameThread, [Self, Converted = KrtuworksConvert::ToPlatformSaveConflict(Conflict)]() {
 			if (Self.IsValid())
 			{
 				Self->OnPlatformSaveConflict.Broadcast(Converted);
+			}
+		});
+		Async(EAsyncExecution::Thread, [Slot, Conflict]() {
+			if (const std::shared_ptr<krtu::UiController> Ui = Slot->Get())
+			{
+				Ui->resolvePlatformSaveConflict(Conflict);
 			}
 		});
 	});
@@ -246,6 +314,124 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				[](const bool&) {},
 				[](const FKrtuworksError& Error) { UE_LOG(LogKrtuworks, Log, TEXT("Krtuworks: the sign-in that started the app did not finish (%s)."), *Error.Code); });
 		}
+	}
+}
+
+void UKrtuworksSubsystem::BuildUi()
+{
+	if (!Client || !UiStore)
+	{
+		return;
+	}
+	const UKrtuworksSettings& Settings = *GetDefault<UKrtuworksSettings>();
+	if (!UiSlot)
+	{
+		UiSlot = std::make_shared<FKrtuworksUiSlot>();
+	}
+	if (!UiLook)
+	{
+		UiLook = std::make_shared<FKrtuworksUiLook>();
+		UiLook->Theme = Settings.Theme;
+		for (const TPair<FName, FText>& Override : Settings.TextOverrides)
+		{
+			UiLook->Texts[ToStd(Override.Key.ToString())] = ToStd(Override.Value.ToString());
+		}
+		UiLook->bControllerHints = Settings.ControllerHints == EKrtuworksControllerHints::Always || (Settings.ControllerHints == EKrtuworksControllerHints::Automatic && IsConsole());
+	}
+	if (!UiHost)
+	{
+		UiHost = KrtuworksUi::MakeSlateHost(UiLook);
+	}
+	krtu::UiOptions Options;
+	Options.texts = UiLook->Texts;
+	Options.locale = ToStd(FInternationalization::Get().GetCurrentLanguage()->GetName());
+	Options.guests = Settings.bGuests;
+	Options.linkReminder = Settings.bLinkReminder;
+	Options.platformSaveConflicts = Settings.bPlatformSaveConflicts;
+	Options.signInMode = ResolveSignInMode(Settings.SignInMode);
+	Options.openUrl = [](const std::string& Url) {
+		// The browser opens from the game thread (macOS and Android want it there).
+		AsyncTask(ENamedThreads::GameThread, [Address = ToFString(Url)]() { FPlatformProcess::LaunchURL(*Address, nullptr, nullptr); });
+	};
+	Options.authenticate = &KrtuworksPlatform::AuthenticateOnPhone;
+	Options.deviceName = Clip(FPlatformMisc::GetDeviceMakeAndModel(), 60);
+	const std::shared_ptr<FKrtuworksUiSlot> Slot = UiSlot;
+	Options.describeSave = [Slot](const std::string& SlotKey, const std::string& Bytes) { return Slot->Describe(SlotKey, Bytes); };
+	Options.memory = UiStore;
+	UiSlot->Set(std::make_shared<krtu::UiController>(Client, UiHost, std::move(Options)));
+}
+
+void UKrtuworksSubsystem::RunUi(TFunction<krtu::UiResult(krtu::UiController&)> Work, TFunction<void(const FKrtuworksScreenResult&)> OnDone)
+{
+	const std::shared_ptr<krtu::UiController> Ui = UiSlot ? UiSlot->Get() : nullptr;
+	if (!Ui)
+	{
+		OnDone(Unavailable());
+		return;
+	}
+	Run<krtu::UiResult>(
+		[Ui, Work = MoveTemp(Work)](krtu::Client&) { return Work(*Ui); },
+		[OnDone](const krtu::UiResult& Result) { OnDone(ToScreenResult(Result)); },
+		[OnDone](const FKrtuworksError& Error) {
+			UE_LOG(LogKrtuworks, Warning, TEXT("Krtuworks: the ready-made screens stopped: %s (%s)"), *Error.Message, *Error.Code);
+			OnDone(Unavailable());
+		});
+}
+
+void UKrtuworksSubsystem::EnsurePlayer(TFunction<void(const FKrtuworksScreenResult&)> OnDone)
+{
+	RunUi([](krtu::UiController& Ui) { return Ui.ensurePlayer(); }, MoveTemp(OnDone));
+}
+
+void UKrtuworksSubsystem::SignInWithScreens(const krtu::CancelToken& Cancel, TFunction<void(const FKrtuworksScreenResult&)> OnDone)
+{
+	RunUi([Cancel](krtu::UiController& Ui) { return Ui.signIn(Cancel); }, MoveTemp(OnDone));
+}
+
+bool UKrtuworksSubsystem::IsSignInOffered() const
+{
+	const std::shared_ptr<krtu::UiController> Ui = UiSlot ? UiSlot->Get() : nullptr;
+	return Ui && Ui->signInOffered();
+}
+
+std::shared_ptr<krtu::UiController> UKrtuworksSubsystem::GetUi() const
+{
+	return UiSlot ? UiSlot->Get() : nullptr;
+}
+
+void UKrtuworksSubsystem::SetUiTheme(const FKrtuworksUiTheme& Theme)
+{
+	if (UiLook)
+	{
+		UiLook->Theme = Theme;
+	}
+}
+
+void UKrtuworksSubsystem::SetUiText(FName Key, const FText& Text)
+{
+	if (!UiLook)
+	{
+		return;
+	}
+	const std::string Name = ToStd(Key.ToString());
+	const std::string Value = ToStd(Text.ToString());
+	if (Value.empty())
+	{
+		UiLook->Texts.erase(Name);
+	}
+	else
+	{
+		UiLook->Texts[Name] = Value;
+	}
+	// The controller words its own sentences (a ban's end, a save's time) from the same table: a new one takes over, a call in flight finishes with the old.
+	BuildUi();
+}
+
+void UKrtuworksSubsystem::SetSaveDescriber(std::function<std::optional<krtu::SaveSummary>(const std::string&, const std::string&)> Describer)
+{
+	if (UiSlot)
+	{
+		UiSlot->SetDescriber(std::move(Describer));
 	}
 }
 
@@ -286,6 +472,15 @@ void UKrtuworksSubsystem::Deinitialize()
 	if (Writes)
 	{
 		Writes->WaitUntilEmpty();
+	}
+	if (UiHost)
+	{
+		// Anyone waiting on a screen is let go before the client shuts down.
+		UiHost->Shutdown();
+	}
+	if (UiSlot)
+	{
+		UiSlot->Set(nullptr);
 	}
 	if (const std::shared_ptr<krtu::Client> Held = MoveTemp(Client))
 	{

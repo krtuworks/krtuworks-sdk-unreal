@@ -12,6 +12,7 @@ class UKrtuworksSubsystem;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksFailed, const FKrtuworksError&, Error);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FKrtuworksDone);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksPlayerReady, const FKrtuworksPlayer&, Player);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksScreensOffline, const FString&, Reason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksCodeReady, const FKrtuworksDeviceLink&, Link);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksFileSaved, const FKrtuworksFileVersion&, Version);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksFileReadDone, const FKrtuworksFileRead&, File);
@@ -90,6 +91,69 @@ public:
 
 	/** Stops waiting for the browser (OnFailure with cancelled). */
 	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Sign-in")
+	void Cancel();
+
+	virtual void Activate() override;
+
+private:
+	krtu::CancelToken CancelToken;
+};
+
+/** The ready-made screens: makes sure someone is playing. */
+UCLASS()
+class KRTUWORKS_API UKrtuworksEnsurePlayer : public UKrtuworksNode
+{
+	GENERATED_BODY()
+
+public:
+	/** Someone plays: the guest on this device or the signed-in account. */
+	UPROPERTY(BlueprintAssignable)
+	FKrtuworksPlayerReady OnSignedIn;
+
+	/** No online player; the game goes on offline. Reason is "underage" (under 13) or "unavailable" (no connection, a refusal, the player chose to keep playing). */
+	UPROPERTY(BlueprintAssignable)
+	FKrtuworksScreensOffline OnOffline;
+
+	/**
+	 * Makes sure someone is playing, with the SDK's own screens: a new guest gets the age screen once, an outdated terms
+	 * version the terms screen, a refusal the error screen; the age screen's "Sign in with Krtuworks ID" signs in on
+	 * this platform's way (browser, system sheet, or a code on a console). Never fails: without an online player
+	 * OnOffline says why. Colours, corners, font and every sentence are in Project Settings > Plugins > Krtuworks SDK.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Screens", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Ensure Player"))
+	static UKrtuworksEnsurePlayer* EnsurePlayer(const UObject* WorldContextObject);
+
+	virtual void Activate() override;
+};
+
+/** The ready-made screens: signs the player in with Krtuworks ID. */
+UCLASS()
+class KRTUWORKS_API UKrtuworksSignInWithScreens : public UKrtuworksNode
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintAssignable)
+	FKrtuworksPlayerReady OnSignedIn;
+
+	/** The player closed the sign-in; they stay who they were. */
+	UPROPERTY(BlueprintAssignable)
+	FKrtuworksDone OnCancelled;
+
+	/** Signing in is not offered (sign-in mode None) or it failed (the error screen was shown). */
+	UPROPERTY(BlueprintAssignable)
+	FKrtuworksScreensOffline OnOffline;
+
+	/**
+	 * Signs the player in with Krtuworks ID with the SDK's own screens: the system browser with a waiting screen on
+	 * desktops, the system sheet on iOS and Android, a code and a QR code on consoles. A guest playing here is carried
+	 * along.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Screens", meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject", DisplayName = "Sign In (Ready-made Screens)"))
+	static UKrtuworksSignInWithScreens* SignInWithScreens(const UObject* WorldContextObject);
+
+	/** Stops the sign-in (OnCancelled). */
+	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Screens")
 	void Cancel();
 
 	virtual void Activate() override;

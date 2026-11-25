@@ -4,6 +4,11 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.5 - 2026-11-25
+
+### Added
+- Ready-made screens, built in Slate (no assets to import): the `Ensure Player` node (C++ `UKrtuworksSubsystem::EnsurePlayer`) shows the age and terms screen before a new guest, a screen for players under 13 (the game goes on offline and the screen is not shown again until their 13th birthday), the screen for newer terms, and an error screen with Try again and Keep playing. Signing in (`Sign In (Ready-made Screens)`, or "Sign in with Krtuworks ID" on the age screen) follows the platform: the system browser with a waiting screen (Open the page again, Cancel) on desktops, the system sheet on iOS and Android, a code, the address and a QR code on consoles (a new code replaces the old on the same screen; an expired code asks for a new one). `GetUi()->save(...)` shows both saves when another device saved first and does what the player picks (`SetSaveDescriber` adds the game's own chapter, play time or picture to each card), and the same screen asks which save to keep when Steam Cloud holds a different copy. A guest gets the "link a Krtuworks ID" prompt in a corner when the SDK says it is time. The `Krtuworks Sign-in Button` and `Krtuworks Account Chip` widgets go in any UMG layout. Every screen works with a gamepad and a keyboard (focus, Accept, Back). Colours, corners and font are `Theme` in Project Settings > Plugins > Krtuworks SDK (`SetUiTheme` at runtime), every sentence can be replaced (`TextOverrides`, localizable), and a game that draws its own screens gets the same models through `krtu::UiController` and its own `krtu::UiHost`.
+
 ## 1.0.4 - 2026-11-22
 
 ### Fixed

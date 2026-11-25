@@ -438,6 +438,84 @@ void UKrtuworksSignIn::Activate()
 		});
 }
 
+namespace
+{
+	/** The screens end in a player, a cancel or "offline": the pin of each. */
+	template <class TNode>
+	void FinishScreens(const TWeakObjectPtr<TNode>& Node, const FKrtuworksScreenResult& Result)
+	{
+		if (Result.bSignedIn)
+		{
+			Node->OnSignedIn.Broadcast(Result.Player);
+		}
+		else
+		{
+			Node->OnOffline.Broadcast(Result.OfflineReason);
+		}
+		Node->SetReadyToDestroy();
+	}
+}
+
+UKrtuworksEnsurePlayer* UKrtuworksEnsurePlayer::EnsurePlayer(const UObject* WorldContextObject)
+{
+	UKrtuworksEnsurePlayer* Node = NewObject<UKrtuworksEnsurePlayer>();
+	Node->Attach(WorldContextObject);
+	return Node;
+}
+
+void UKrtuworksEnsurePlayer::Activate()
+{
+	if (!Subsystem.IsValid() || !Subsystem->IsReady())
+	{
+		OnOffline.Broadcast(TEXT("unavailable"));
+		SetReadyToDestroy();
+		return;
+	}
+	TWeakObjectPtr<UKrtuworksEnsurePlayer> Self(this);
+	Subsystem->EnsurePlayer([Self](const FKrtuworksScreenResult& Result) {
+		if (Self.IsValid())
+		{
+			FinishScreens(Self, Result);
+		}
+	});
+}
+
+UKrtuworksSignInWithScreens* UKrtuworksSignInWithScreens::SignInWithScreens(const UObject* WorldContextObject)
+{
+	UKrtuworksSignInWithScreens* Node = NewObject<UKrtuworksSignInWithScreens>();
+	Node->Attach(WorldContextObject);
+	return Node;
+}
+
+void UKrtuworksSignInWithScreens::Cancel()
+{
+	CancelToken.cancel();
+}
+
+void UKrtuworksSignInWithScreens::Activate()
+{
+	if (!Subsystem.IsValid() || !Subsystem->IsReady())
+	{
+		OnOffline.Broadcast(TEXT("unavailable"));
+		SetReadyToDestroy();
+		return;
+	}
+	TWeakObjectPtr<UKrtuworksSignInWithScreens> Self(this);
+	Subsystem->SignInWithScreens(CancelToken, [Self](const FKrtuworksScreenResult& Result) {
+		if (!Self.IsValid())
+		{
+			return;
+		}
+		if (Result.bCancelled)
+		{
+			Self->OnCancelled.Broadcast();
+			Self->SetReadyToDestroy();
+			return;
+		}
+		FinishScreens(Self, Result);
+	});
+}
+
 UKrtuworksSignInWithCode* UKrtuworksSignInWithCode::SignInWithCode(const UObject* WorldContextObject, const FString& DeviceName)
 {
 	UKrtuworksSignInWithCode* Node = NewObject<UKrtuworksSignInWithCode>();

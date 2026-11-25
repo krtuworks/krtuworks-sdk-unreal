@@ -3,7 +3,7 @@ using UnrealBuildTool;
 
 // The Krtuworks SDK for Unreal (5.3+): the engine-independent core (Public/KrtuworksCore, Private/KrtuworksCore:
 // standard C++ only, tested outside the engine with g++) and the thin engine layer around it (HTTP, file and
-// secret storage per platform, the phone sign-in, Blueprint nodes).
+// secret storage per platform, the phone sign-in, Blueprint nodes, the ready-made screens in Slate).
 public class Krtuworks : ModuleRules
 {
 	public Krtuworks(ReadOnlyTargetRules Target) : base(Target)
@@ -15,8 +15,8 @@ public class Krtuworks : ModuleRules
 		// The core reports failures as krtu::Error exceptions; the engine layer catches them at the edge.
 		bEnableExceptions = true;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "DeveloperSettings" });
-		PrivateDependencyModuleNames.AddRange(new string[] { "HTTP", "Projects", "ApplicationCore", "EngineSettings", "ImageWrapper" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "DeveloperSettings", "SlateCore", "UMG" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "HTTP", "Projects", "ApplicationCore", "EngineSettings", "ImageWrapper", "InputCore", "Slate" });
 		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Private", "KrtuworksCore"));
 
 		if (Target.Platform == UnrealTargetPlatform.Win64)

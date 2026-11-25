@@ -2,13 +2,34 @@
 
 #include "CoreMinimal.h"
 #include "KrtuworksCore/Client.h"
+#include "KrtuworksCore/Ui.h"
+#include "KrtuworksSettings.h"
 #include "KrtuworksTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Tasks/Pipe.h"
 
+#include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "KrtuworksSubsystem.generated.h"
+
+class FKrtuworksUiSlot;
+class IKrtuworksUiHost;
+struct FKrtuworksUiLook;
+
+/** What the ready-made screens ended with: the player, the player closing the sign-in, or no online player. */
+struct KRTUWORKS_API FKrtuworksScreenResult
+{
+	/** Someone plays: Player is the guest on this device or the signed-in account. */
+	bool bSignedIn = false;
+	/** The player closed the sign-in (SignInWithScreens only); they stay who they were. */
+	bool bCancelled = false;
+	/** With neither of the two: "underage" (under 13) or "unavailable" (no connection, a refusal, the player chose to keep playing); the game goes on offline. */
+	FString OfflineReason;
+	FKrtuworksPlayer Player;
+};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKrtuworksIdentityChanged, const FKrtuworksIdentityChange&, Change);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKrtuworksMergeSettled, const FString&, PreviousSubject, int32, WaitingSaves);
@@ -199,6 +220,46 @@ public:
 	static void SetPlatformServicesFactory(TFunction<std::shared_ptr<krtu::PlatformServices>()> Factory);
 
 	/**
+	 * The ready-made screens: makes sure someone is playing. A new guest gets the age screen once, an outdated terms
+	 * version the terms screen, a refusal the error screen; "Sign in with Krtuworks ID" on the age screen runs
+	 * SignInWithScreens. Never fails: without an online player the result says so and the game keeps going offline.
+	 * `OnDone` runs on the game thread.
+	 */
+	void EnsurePlayer(TFunction<void(const FKrtuworksScreenResult&)> OnDone);
+
+	/**
+	 * Signs the player in with Krtuworks ID with the ready-made screens: the system browser with a waiting screen
+	 * (desktops), the system sheet (iOS, Android), a code and a QR code (consoles), as Project Settings > Plugins >
+	 * Krtuworks SDK says. `Cancel` stops it from outside. `OnDone` runs on the game thread.
+	 */
+	void SignInWithScreens(const krtu::CancelToken& Cancel, TFunction<void(const FKrtuworksScreenResult&)> OnDone);
+
+	/** Whether the ready-made screens offer signing in (not with the sign-in mode None). */
+	bool IsSignInOffered() const;
+
+	/**
+	 * The ready-made screens' controller for C++ (empty before IsReady()): its calls block, so make them off the game
+	 * thread (Async, RunErased). Saves with the conflict screen (save), merged accounts' saves (resolveMergedSaves),
+	 * the link reminder (remind) and Steam Cloud's conflict (resolvePlatformSaveConflict) are there.
+	 */
+	std::shared_ptr<krtu::UiController> GetUi() const;
+
+	/** The screens' look and sentences, for the module's own widgets. */
+	std::shared_ptr<FKrtuworksUiLook> GetUiLook() const { return UiLook; }
+
+	/** The theme of the screens, from now on (it starts as Project Settings'). Screens already open keep theirs. */
+	void SetUiTheme(const FKrtuworksUiTheme& Theme);
+
+	/** A sentence of the screens, from now on (the texts start as Project Settings' overrides). An empty text brings the English one back. */
+	void SetUiText(FName Key, const FText& Text);
+
+	/**
+	 * Reads a save's bytes into what its card on the conflict screen shows (chapter, play time, a picture): runs off
+	 * the game thread; may return nothing.
+	 */
+	void SetSaveDescriber(std::function<std::optional<krtu::SaveSummary>(const std::string& Slot, const std::string& Bytes)> Describer);
+
+	/**
 	 * The Krtuworks validator (the Validate node): checks this build's setup (krtuworks-config.json, the platform,
 	 * Steam's services), then runs a TEST round against the servers with the game's own config, build and stores,
 	 * logs each check and hands the report on the game thread. The build's release report turns green with it.
@@ -207,6 +268,8 @@ public:
 
 private:
 	void EnqueueWrite(TFunction<void(krtu::Client&)> Write);
+	void BuildUi();
+	void RunUi(TFunction<krtu::UiResult(krtu::UiController&)> Work, TFunction<void(const FKrtuworksScreenResult&)> OnDone);
 	void OnEnterBackground();
 	void OnEnterForeground();
 
@@ -217,6 +280,11 @@ private:
 	TUniquePtr<UE::Tasks::FPipe> Writes;
 	FDelegateHandle BackgroundHandle;
 	FDelegateHandle ForegroundHandle;
+	/** The screens' look and sentences, the host that draws them and the controller (replaced when a sentence changes). */
+	std::shared_ptr<FKrtuworksUiLook> UiLook;
+	std::shared_ptr<IKrtuworksUiHost> UiHost;
+	std::shared_ptr<FKrtuworksUiSlot> UiSlot;
+	std::shared_ptr<krtu::KeyValueStore> UiStore;
 };
 
 template <class TResult>
