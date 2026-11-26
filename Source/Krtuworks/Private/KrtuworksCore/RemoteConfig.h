@@ -16,7 +16,7 @@ class RemoteConfig
 {
 public:
     /// The SDK modules the owner switches per app and environment.
-    static const char* const modules[18];
+    static const char* const modules[19];
 
     RemoteConfig(const Resolved& opts, Api& api, KeyValueStore& store);
 

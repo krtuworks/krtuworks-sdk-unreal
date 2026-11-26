@@ -213,6 +213,8 @@ struct KRTU_API Options
     std::optional<std::string> locale;
     /// Opens a session and keeps it alive.
     bool sessions = true;
+    /// How often Client::samplePosition tells where the player is, in whole seconds (1-600).
+    int positionSampleSeconds = 10;
     std::string idOrigin = "https://id.krtuworks.com";
     std::string devOrigin = "https://dev.krtuworks.com";
     /// The background work (heartbeats, sending every 30 s, the remote config every 5 min) on a thread of the

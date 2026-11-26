@@ -4,6 +4,14 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.11 - 2026-11-26
+
+### Added
+- `samplePosition` (C++, Blueprint `Sample Position`): the game reports where the player is as often as it likes; at most one `position_sample` per `PositionSampleSeconds` (default 10) of active play goes out with the seconds since the one before, for the time heat map.
+
+### Fixed
+- The `position_sample` event belongs to its own module switch, `positions`, as on the server, and only a game sends it. Before, the SDK counted it as one of the app's own events: with `customEvents` off it was dropped, and with `customEvents` on it was sent even while the server's switch was off.
+
 ## 1.0.10 - 2026-11-26
 
 ### Fixed

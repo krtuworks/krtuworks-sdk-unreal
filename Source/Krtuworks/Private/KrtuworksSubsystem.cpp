@@ -4,6 +4,7 @@
 #include "GeneralProjectSettings.h"
 #include "GenericPlatform/GenericApplication.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformTime.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "Kismet/GameplayStatics.h"
@@ -220,6 +221,7 @@ void UKrtuworksSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Options.device = DeviceDescription();
 		Options.locale = ToStd(FInternationalization::Get().GetCurrentLanguage()->GetName());
 		Options.sessions = Settings.bSessions;
+		Options.positionSampleSeconds = Settings.PositionSampleSeconds;
 		ValidatorOptions = Options;
 		Client = std::shared_ptr<krtu::Client>(krtu::Client::initialize(MoveTemp(Options)));
 	}
@@ -635,6 +637,18 @@ void UKrtuworksSubsystem::Death(const FString& Cause, const FString& Enemy, bool
 		Place = KrtuworksConvert::ToPosition(Position);
 	}
 	EnqueueWrite([CauseName = ToStd(Cause), EnemyName, Place](krtu::Client& C) { C.death(CauseName, EnemyName, Place); });
+}
+
+void UKrtuworksSubsystem::SamplePosition(const FKrtuworksPosition& Position)
+{
+	// Called every frame: the core's active clock moves in whole seconds, so one look a second is all it can use.
+	const double Now = FPlatformTime::Seconds();
+	if (Now < NextPositionLook)
+	{
+		return;
+	}
+	NextPositionLook = Now + 1.0;
+	EnqueueWrite([Place = KrtuworksConvert::ToPosition(Position)](krtu::Client& C) { C.samplePosition(Place); });
 }
 
 void UKrtuworksSubsystem::ReportError(const FString& Message, const FString& Kind, const FString& Fingerprint, bool bHandled)

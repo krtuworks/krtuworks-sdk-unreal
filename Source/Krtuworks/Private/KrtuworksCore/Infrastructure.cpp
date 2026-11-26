@@ -520,6 +520,7 @@ Resolved Resolved::from(const Options& o)
     std::optional<std::string> clientId = o.clientId;
     if (!clientId && clients != nullptr) clientId = clients->clientId;
     if (!clientId || clientId->empty()) throw std::invalid_argument("krtuworks-config.json names no client for " + o.environment);
+    if (o.positionSampleSeconds < 1 || o.positionSampleSeconds > 600) throw std::invalid_argument("positionSampleSeconds is a whole number of seconds, 1-600");
     Resolved r;
     r.appId = o.config.appId;
     r.slug = o.config.slug;
@@ -538,6 +539,7 @@ Resolved Resolved::from(const Options& o)
     r.device = o.device;
     r.locale = o.locale;
     r.sessions = o.sessions;
+    r.positionSampleSeconds = o.positionSampleSeconds;
     r.delay = o.delay ? o.delay : [](std::chrono::milliseconds duration, const CancelToken& cancel) { sleepFor(duration, cancel); };
     return r;
 }
@@ -548,7 +550,7 @@ std::string moduleOf(const std::string& eventType)
         {"screen_view", "ui"}, {"button", "ui"},           {"tutorial", "ui"},           {"progression", "progression"},
         {"death", "combat"},   {"damage", "combat"},       {"economy", "economy"},       {"balance", "economy"},
         {"item", "items"},     {"interaction", "items"},   {"performance", "performance"}, {"settings", "settings"},
-        {"error", "errors"},
+        {"error", "errors"},   {"position_sample", "positions"},
     };
     const auto found = families.find(eventType);
     return found == families.end() ? "customEvents" : found->second;

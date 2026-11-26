@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 12,
-	"VersionName": "1.0.10",
+	"Version": 13,
+	"VersionName": "1.0.11",
 	"FriendlyName": "Krtuworks SDK",
 	"Description": "Krtuworks ID sign-in (guest, browser, phone, console code, Steam), telemetry, stats and achievements, cloud saves, remote config and A/B tests for Krtuworks games and apps.",
 	"Category": "Online",

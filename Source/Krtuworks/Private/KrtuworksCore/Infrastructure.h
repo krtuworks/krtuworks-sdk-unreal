@@ -220,6 +220,7 @@ struct Resolved
     std::optional<DeviceInfo> device;
     std::optional<std::string> locale;
     bool sessions = true;
+    int positionSampleSeconds = 10;
     std::function<void(std::chrono::milliseconds, const CancelToken&)> delay;
 
     static constexpr const char* devResource = "https://dev.krtuworks.com";

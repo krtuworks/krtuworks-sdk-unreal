@@ -25,9 +25,9 @@ std::vector<long long> configVersionParts(const std::string& version)
 }
 }  // namespace
 
-const char* const RemoteConfig::modules[18] = {
+const char* const RemoteConfig::modules[19] = {
     "sessions", "progression", "combat", "economy", "items", "ui", "performance", "settings", "errors", "bugReports", "achievements", "stats", "cloudSave", "remoteConfig", "abTests", "customEvents",
-    "leaderboards", "presence",
+    "leaderboards", "presence", "positions",
 };
 
 RemoteConfig::RemoteConfig(const Resolved& opts, Api& api, KeyValueStore& store) : opts_(opts), api_(api), store_(store), value_(Json::object())
@@ -85,7 +85,7 @@ bool RemoteConfig::refresh()
 
 bool RemoteConfig::moduleOn(const std::string& module) const
 {
-    if (!opts_.game() && (module == "progression" || module == "combat")) return false;
+    if (!opts_.game() && (module == "progression" || module == "combat" || module == "positions")) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     const auto& setting = value_["config"]["modules"][module];
     return !setting.isBool() || setting.asBool();

@@ -109,6 +109,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Krtuworks")
 	bool bSessions = true;
 
+	/** How often SamplePosition tells where the player is, in seconds (1-600). */
+	UPROPERTY(Config, EditAnywhere, Category = "Krtuworks", meta = (ClampMin = "1", ClampMax = "600"))
+	int32 PositionSampleSeconds = 10;
+
 	/**
 	 * The app's slug from krtuworks-config.json, copied here by the editor whenever the file changes: the
 	 * Android build reads it from the project's config to register the sign-in's return scheme

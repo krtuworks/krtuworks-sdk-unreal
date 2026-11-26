@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <limits>
 #include <map>
@@ -20,6 +21,7 @@
 #include "Identity.h"
 #include "Infrastructure.h"
 #include "Entitlements.h"
+#include "Positions.h"
 #include "Presence.h"
 #include "Progress.h"
 #include "Progression.h"
@@ -79,6 +81,7 @@ struct Client::Impl
                   return place ? std::optional<std::string>(place->level) : std::nullopt;
               },
               [this] { return sessions.sessionActiveSeconds(); }, [this](const std::string& line) { bugs.log(line); }),
+          positions(options.positionSampleSeconds),
           licences(options, api, *store, ownershipPlatform(), [this] { return subject(); }),
           backgroundLoop(o.backgroundLoop),
           started(std::chrono::steady_clock::now())
@@ -228,6 +231,7 @@ struct Client::Impl
             experiments.clear();
         }
         optedOut.store(false);
+        positions.reset();
     }
 
     Player signInAsGuest(const std::optional<std::string>& birthDate, const std::optional<std::string>& acceptedTerms)
@@ -822,6 +826,7 @@ struct Client::Impl
     std::unique_ptr<StatMirror> statMirror;
     std::unique_ptr<CloudMirror> cloudMirror;
     Presence presence;
+    PositionSampler positions;
     Entitlements licences;
     bool backgroundLoop;
     std::chrono::steady_clock::time_point started;
@@ -1013,6 +1018,20 @@ bool Client::death(const std::string& cause, const std::optional<std::string>& e
     if (place && place->world && !place->world->empty()) data["world"] = *place->world;
     if (place && !place->level.empty()) data["level"] = place->level;
     return impl_->track("death", data, position, std::nullopt);
+}
+
+bool Client::samplePosition(const EventPosition& position)
+{
+    if (!impl_->options.game()) return false;
+    if ((position.space != "world" && position.space != "screen") || position.area.empty()) throw std::invalid_argument("position is {space: world|screen, area, x, y, z?}");
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z.value_or(0))) throw std::invalid_argument("position x, y and z are finite numbers");
+    const auto seconds = impl_->positions.due(impl_->sessions.activeSeconds());
+    if (!seconds) return false;
+    const auto place = impl_->levels.inPlay();
+    auto data = Json::object({{"seconds", *seconds}});
+    if (place && place->world && !place->world->empty()) data["world"] = *place->world;
+    if (place && !place->level.empty()) data["level"] = place->level;
+    return impl_->track("position_sample", data, position, std::nullopt);
 }
 
 bool Client::error(const std::string& message, const std::string& kind, const std::optional<std::string>& fingerprint, bool handled)

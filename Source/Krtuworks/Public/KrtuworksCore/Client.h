@@ -92,6 +92,11 @@ public:
     void levelRestart();
     /// A death, counted toward the level in play and told with its place.
     bool death(const std::string& cause, const std::optional<std::string>& enemy = std::nullopt, const std::optional<EventPosition>& position = std::nullopt);
+    /// Where the player is now: call it as often as the game likes (every frame is fine). At most one `position_sample`
+    /// goes out per `positionSampleSeconds` of active play, carrying the seconds since the one before, with the level in
+    /// play. Games only, with the positions module on; returns whether a sample was kept. A position without an area
+    /// or with a number that is not finite throws std::invalid_argument.
+    bool samplePosition(const EventPosition& position);
     /// An error the game caught, as the errors family tells it (kind: exception, crash, assert, other).
     bool error(const std::string& message, const std::string& kind = "exception", const std::optional<std::string>& fingerprint = std::nullopt, bool handled = true);
     bool error(const std::exception& err, const std::string& kind = "exception", const std::optional<std::string>& fingerprint = std::nullopt, bool handled = true);

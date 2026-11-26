@@ -137,6 +137,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Levels")
 	void Death(const FString& Cause, const FString& Enemy, bool bHasPosition, const FKrtuworksPosition& Position);
 
+	/** Where the player is: call it every frame if you like. At most one position sample per PositionSampleSeconds of play goes out. */
+	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Levels")
+	void SamplePosition(const FKrtuworksPosition& Position);
+
 	/** An error the game caught (Kind: exception, crash, assert, other). */
 	UFUNCTION(BlueprintCallable, Category = "Krtuworks|Events")
 	void ReportError(const FString& Message, const FString& Kind = TEXT("exception"), const FString& Fingerprint = TEXT(""), bool bHandled = true);
@@ -278,6 +282,8 @@ private:
 	std::optional<krtu::Options> ValidatorOptions;
 	/** Writes to the device's queues (levels, stats, unlocks) one at a time, in the order the game made them. */
 	TUniquePtr<UE::Tasks::FPipe> Writes;
+	/** When SamplePosition next hands a position to the core (game thread only). */
+	double NextPositionLook = 0.0;
 	FDelegateHandle BackgroundHandle;
 	FDelegateHandle ForegroundHandle;
 	/** The screens' look and sentences, the host that draws them and the controller (replaced when a sentence changes). */
