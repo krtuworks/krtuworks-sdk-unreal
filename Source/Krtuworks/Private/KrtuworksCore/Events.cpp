@@ -1,6 +1,7 @@
 #include "Events.h"
 
 #include <algorithm>
+#include <iterator>
 #include <set>
 
 #include "KrtuworksCore/Gzip.h"
@@ -165,24 +166,37 @@ void EventQueue::persist()
         }
         group->second.push_back(std::move(entry.second));
     }
+    std::vector<std::pair<std::string, WireEvent>> unwritten;
     for (auto& group : groups)
     {
-        auto lock = NamedLocks::take(key(group.first));
-        auto state = load(group.first);
-        for (auto& e : group.second) state.pending.push_back(std::move(e));
-        trim(state);
-        save(group.first, state);
+        try
+        {
+            auto lock = NamedLocks::take(key(group.first));
+            auto state = load(group.first);
+            for (const auto& e : group.second) state.pending.push_back(e);
+            trim(state);
+            save(group.first, state);
+        }
+        catch (...)
+        {
+            // The store refused the write (full, busy): the events stay in memory for the next persist.
+            for (auto& e : group.second) unwritten.emplace_back(group.first, std::move(e));
+        }
     }
+    if (unwritten.empty()) return;
+    std::lock_guard<std::mutex> lock(bufferMutex_);
+    buffer_.insert(buffer_.begin(), std::make_move_iterator(unwritten.begin()), std::make_move_iterator(unwritten.end()));
+    if (buffer_.size() > eventsMaxCount) buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(buffer_.size() - eventsMaxCount));
 }
 
-void EventQueue::trim(EventQueueState& state)
+void EventQueue::trim(EventQueueState& state) const
 {
-    const auto oldest = nowMs() - eventsMaxAgeMs;
+    const auto oldest = clock_.serverNowMs() - eventsMaxAgeMs;
     const auto before = state.pending.size();
     state.pending.erase(std::remove_if(state.pending.begin(), state.pending.end(),
                                        [oldest](const WireEvent& e) {
                                            const auto at = parseTimeMs(e.createdAt);
-                                           return at && *at < oldest;
+                                           return at && *at + e.serverOffsetMs.value_or(0) < oldest;
                                        }),
                         state.pending.end());
     std::size_t bytes = 0;
@@ -443,7 +457,9 @@ std::string EventQueue::failed(const std::string& owner, const FrozenBatch& batc
         unfreeze(owner, batch);
         return "done";
     }
-    if (err.status() == 400 || err.status() == 413)
+    // An error that came before the call (a refused refresh) or a refusal that can lift says nothing against the
+    // batch: it stays frozen and goes again later.
+    if ((err.status() == 400 || err.status() == 413) && !err.waitsForLater())
     {
         // The batch itself can never be taken: drop it rather than block every later event.
         auto lock = NamedLocks::take(key(owner));
@@ -456,9 +472,7 @@ std::string EventQueue::failed(const std::string& owner, const FrozenBatch& batc
         }
         return err.code();
     }
-    const auto backoff = (std::min)(static_cast<std::int64_t>(300000), (std::max)(static_cast<std::int64_t>(5000), backoffMs_.load() * 2));
-    backoffMs_.store(backoff);
-    notBefore_.store(nowMs() + (err.retryAfter() ? static_cast<std::int64_t>(*err.retryAfter() * 1000) : backoff));
+    notBefore_.store(nowMs() + queueWaitMs(err, backoffMs_));
     return err.code();
 }
 
@@ -466,5 +480,15 @@ void EventQueue::resetBackoff()
 {
     notBefore_.store(0);
     backoffMs_.store(0);
+}
+
+void EventQueue::drop(const std::string& owner)
+{
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex_);
+        buffer_.erase(std::remove_if(buffer_.begin(), buffer_.end(), [&owner](const auto& entry) { return entry.first == owner; }), buffer_.end());
+    }
+    auto lock = NamedLocks::take(key(owner));
+    store_.remove(key(owner));
 }
 }  // namespace krtu::detail

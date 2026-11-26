@@ -35,6 +35,25 @@ public:
     /// True when the same call can succeed later (no answer, a busy or briefly closed server).
     bool retryable() const noexcept { return status_ == 0 || status_ == 429 || status_ >= 500 || code_ == "account_merging"; }
 
+    /// True for the codes under which a refusal can lift (`app_suspended`, `account_merged`, `account_merging`,
+    /// `sanctioned`, `account_deletion_pending`, `switched_off`, `module_disabled`): what a player wrote is never
+    /// dropped for them, it waits on the device.
+    static bool isWaitingCode(const std::string& code) noexcept;
+
+    /// True when the failure came before the endpoint's own call was made: the player's credentials could not be
+    /// had (a refused or failed refresh, a player who left). It says nothing about what was to be sent.
+    bool authLayer() const noexcept { return authLayer_; }
+    /// Marks the failure as an auth-layer one (where the credentials are asked for).
+    Error& asAuthLayer() noexcept
+    {
+        authLayer_ = true;
+        return *this;
+    }
+
+    /// True when a queued write that failed with this error must stay on the device and be sent again later: the
+    /// same call can succeed, a refusal that can lift answered, or the credentials failed before the call.
+    bool waitsForLater() const noexcept { return authLayer_ || retryable() || isWaitingCode(code_); }
+
 private:
     std::string code_;
     std::string message_;
@@ -42,6 +61,7 @@ private:
     std::optional<double> retryAfter_;
     Json details_;
     std::string what_;
+    bool authLayer_ = false;
 };
 
 /// A wait the caller cancelled through its CancelToken (a sign-in the player closed, the app stopping).

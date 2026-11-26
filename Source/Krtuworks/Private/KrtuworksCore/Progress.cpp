@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -14,6 +15,7 @@ namespace
 constexpr double progressMaxValue = 1e15;
 constexpr std::size_t progressMaxOps = 100;
 constexpr std::size_t progressMaxDetails = 64;
+constexpr std::size_t progressMaxRefusals = 200;
 
 /// Refusals that say the stat or achievement itself is gone: what waits for it goes too.
 bool progressKeyGone(const std::string& code)
@@ -476,6 +478,8 @@ ProgressFlushResult ProgressQueue::flush()
     }
     loadKinds();
     loadBoards();
+    // Score ops the server refused with `module_disabled` in this flush: frozen, not sent again before the next one.
+    std::set<std::string> parked;
     for (int round = 0; round < 50; ++round)
     {
         std::vector<FrozenOp> ops;
@@ -485,7 +489,12 @@ ProgressFlushResult ProgressQueue::flush()
             ops = freeze(state);
             save(*owner, state);
         }
-        if (ops.empty()) return output;
+        ops.erase(std::remove_if(ops.begin(), ops.end(), [&parked](const FrozenOp& op) { return parked.count(op.opId) > 0; }), ops.end());
+        if (ops.empty())
+        {
+            if (!parked.empty()) output.stoppedBy = "module_disabled";
+            return output;
+        }
         Answer answer;
         try
         {
@@ -497,14 +506,13 @@ ProgressFlushResult ProgressQueue::flush()
         }
         catch (const Error& err)
         {
-            const auto backoff = (std::min)(static_cast<std::int64_t>(300000), (std::max)(static_cast<std::int64_t>(5000), backoffMs_.load() * 2));
-            backoffMs_.store(backoff);
-            notBefore_.store(nowMs() + (err.retryAfter() ? static_cast<std::int64_t>(*err.retryAfter() * 1000) : backoff));
+            notBefore_.store(nowMs() + queueWaitMs(err, backoffMs_));
             output.stoppedBy = err.code();
             return output;
         }
         backoffMs_.store(0);
         int settled = 0;
+        const auto parkedBefore = parked.size();
         {
             auto lock = NamedLocks::take(key(*owner));
             auto state = load(*owner);
@@ -533,7 +541,11 @@ ProgressFlushResult ProgressQueue::flush()
                 }
                 if (inFlight == nullptr) continue;
                 // The leaderboards module is off: the score is not refused for good, it waits for the module.
-                if (type == "score" && r.getString("status") == std::optional<std::string>("rejected") && r.getString("code") == std::optional<std::string>("module_disabled")) continue;
+                if (type == "score" && r.getString("status") == std::optional<std::string>("rejected") && r.getString("code") == std::optional<std::string>("module_disabled"))
+                {
+                    parked.insert(*opId);
+                    continue;
+                }
                 inFlight->erase(std::remove_if(inFlight->begin(), inFlight->end(), [&opId](const FrozenOp& op) { return op.opId == *opId; }), inFlight->end());
                 ++settled;
                 if (r.getString("status") == std::optional<std::string>("rejected"))
@@ -542,6 +554,7 @@ ProgressFlushResult ProgressQueue::flush()
                     {
                         std::lock_guard<std::mutex> refusalLock(refusalsMutex_);
                         refusals_.push_back(ProgressRefusal{type, opKey, code});
+                        if (refusals_.size() > progressMaxRefusals) refusals_.erase(refusals_.begin());
                     }
                     if (type == "score" ? progressBoardGone(code) : progressKeyGone(code))
                     {
@@ -559,7 +572,7 @@ ProgressFlushResult ProgressQueue::flush()
             }
             save(*owner, state);
         }
-        if (settled == 0)
+        if (settled == 0 && parked.size() == parkedBefore)
         {
             // An answer that settles none of the ops sent: keep them frozen and try again later.
             output.stoppedBy = "unanswered";
@@ -567,6 +580,12 @@ ProgressFlushResult ProgressQueue::flush()
         }
     }
     return output;
+}
+
+void ProgressQueue::drop(const std::string& owner)
+{
+    auto lock = NamedLocks::take(key(owner));
+    store_.remove(key(owner));
 }
 
 void ProgressQueue::resetBackoff()

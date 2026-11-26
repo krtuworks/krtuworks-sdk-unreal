@@ -5,12 +5,14 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "KrtuworksCore/Types.h"
@@ -95,6 +97,8 @@ public:
     explicit SteamAchievementSync(std::unique_ptr<SteamBackend> steam, std::chrono::milliseconds ticketWait = defaultTicketWait);
 
     std::optional<std::string> webApiTicket() override;
+    /// Cancels a ticket webApiTicket() gave that never left for the server (a ticket that was sent stays valid).
+    void cancelWebApiTicket(const std::string& ticket) override;
     std::vector<std::string> unlockedAchievements() override;
     void unlockAchievement(const std::string& platformId) override;
     void clearAchievement(const std::string& platformId) override;
@@ -138,5 +142,7 @@ private:
     std::map<std::uint32_t, std::optional<std::string>> waiting_;
     /// The rich presence keys set since the last clear (a key set twice counts once).
     std::set<std::string> presenceKeys_;
+    /// The newest tickets given out (hex and Steam's handle), so one that was never sent can be cancelled.
+    std::deque<std::pair<std::string, std::uint32_t>> issued_;
 };
 }  // namespace krtu

@@ -11,8 +11,14 @@ namespace
 constexpr std::int64_t sessionsNever = (std::numeric_limits<std::int64_t>::max)();
 }  // namespace
 
-SessionKeeper::SessionKeeper(const Resolved& opts, Api& api, std::function<std::optional<std::string>()> subject, std::function<std::optional<std::string>()> platformTicket)
-    : opts_(opts), api_(api), subject_(std::move(subject)), platformTicket_(std::move(platformTicket)), started_(std::chrono::steady_clock::now()), activeSince_(0)
+SessionKeeper::SessionKeeper(const Resolved& opts, Api& api, std::function<std::optional<std::string>()> subject, std::function<std::optional<std::string>()> platformTicket,
+                             std::function<void(const std::string&)> cancelTicket)
+    : opts_(opts),
+      api_(api),
+      subject_(std::move(subject)),
+      platformTicket_(std::move(platformTicket)),
+      cancelTicket_(std::move(cancelTicket)),
+      started_(std::chrono::steady_clock::now()), activeSince_(0)
 {
     nextHeartbeatAt_ = sessionsNever;
 }
@@ -69,7 +75,54 @@ std::optional<SessionInfo> SessionKeeper::open()
     if (auto existing = session()) return existing;
     std::lock_guard<std::mutex> one(openMutex_);
     if (auto existing = session()) return existing;
-    return doOpen();
+    return openOnce();
+}
+
+std::optional<SessionInfo> SessionKeeper::openOnce()
+{
+    try
+    {
+        auto opened = doOpen();
+        std::lock_guard<std::mutex> lock(mutex_);
+        openFailed_ = false;
+        openBackoffMs_.store(0);
+        return opened;
+    }
+    catch (const Error& err)
+    {
+        // Whatever the reason, the session is asked for again later: never given up for the rest of the run.
+        const auto wait = queueWaitMs(err, openBackoffMs_);
+        std::lock_guard<std::mutex> lock(mutex_);
+        openFailed_ = true;
+        openNotBeforeMs_ = elapsedMs() + wait;
+        throw;
+    }
+}
+
+void SessionKeeper::retryOpen()
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!openFailed_ || elapsedMs() < openNotBeforeMs_) return;
+    }
+    // An open already running is the retry.
+    std::unique_lock<std::mutex> one(openMutex_, std::try_to_lock);
+    if (!one.owns_lock() || session()) return;
+    try
+    {
+        openOnce();
+    }
+    catch (const Error&)
+    {
+        // The wait grew; the next tick after it tries again.
+    }
+}
+
+void SessionKeeper::resetOpenBackoff()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    openNotBeforeMs_ = 0;
+    openBackoffMs_.store(0);
 }
 
 std::optional<SessionInfo> SessionKeeper::doOpen()
@@ -96,15 +149,24 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
     auto body = Json::object({{"clientSessionId", clientSessionId}, {"platform", opts_.platform}, {"build", opts_.build}});
     if (opts_.device) body["device"] = opts_.device->toJson();
     if (opts_.locale) body["locale"] = *opts_.locale;
-    if (platformTicket_)
-    {
-        if (const auto ticket = platformTicket_()) body["platformProof"] = Json::object({{"steamTicket", *ticket}});
-    }
+    std::optional<std::string> ticket;
+    if (platformTicket_) ticket = platformTicket_();
+    if (ticket) body["platformProof"] = Json::object({{"steamTicket", *ticket}});
     PlayerCall call;
     call.method = "POST";
     call.json = body;
     call.owner = *owner;
-    const auto answer = api_.player("/v1/sessions", call);
+    Answer answer;
+    try
+    {
+        answer = api_.player("/v1/sessions", call);
+    }
+    catch (const Error& err)
+    {
+        // A ticket the call never carried (the credentials failed first) is not left valid.
+        if (err.authLayer() && ticket && cancelTicket_) quietly([this, &ticket] { cancelTicket_(*ticket); });
+        throw;
+    }
     const auto& session = answer.body()["session"];
     if (!session.isObject() || subject_() != owner) return std::nullopt;
     std::optional<SessionInfo> opened;
@@ -261,5 +323,8 @@ void SessionKeeper::close()
     current_.reset();
     clientSessionId_.reset();
     nextHeartbeatAt_ = sessionsNever;
+    openFailed_ = false;
+    openNotBeforeMs_ = 0;
+    openBackoffMs_.store(0);
 }
 }  // namespace krtu::detail

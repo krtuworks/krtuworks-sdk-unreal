@@ -177,6 +177,8 @@ ErrorScreen errorScreen(const Error& err, const UiTexts& texts, const std::strin
         if (endsAtMs) message += " " + textFor(texts, "error.bannedUntil", {{"date", longDate(*endsAtMs, utcOffsetMinutes, locale, texts)}});
         return {message, false};
     }
+    if (code == "account_deletion_pending") return {textFor(texts, "error.deletionPending"), false};
+    if (code == "account_deleted") return {textFor(texts, "error.deleted"), false};
     if (code == "guest_limit" || code == "guest_capacity") return {textFor(texts, "error.busy"), true};
     if (code == "app_suspended" || code == "maintenance") return {textFor(texts, "error.maintenance"), true};
     if (code == "access_denied" || code == "cancelled") return {textFor(texts, "error.cancelled"), true};
@@ -241,6 +243,23 @@ UiResult UiController::ensurePlayer()
     try
     {
         if (const auto player = client_->player()) return signedIn(*player);
+        // A game that needs the server on its very first launch waits for it.
+        while (client_->getGate().firstLaunchOffline)
+        {
+            UiScreen screen;
+            screen.kind = UiScreenKind::Error;
+            screen.message = t("error.firstLaunch");
+            screen.retry = true;
+            if (once(screen).kind != UiAnswerKind::Retry) return offline(UiOfflineReason::Unavailable);
+            try
+            {
+                client_->refreshConfig();
+            }
+            catch (const std::exception&)
+            {
+                // Still no server: the screen asks again.
+            }
+        }
         if (const auto blocked = gateProblem()) return failOffline(*blocked);
         if (underageNow()) return offline(UiOfflineReason::Underage);
         if (!options_.guests)
@@ -697,7 +716,9 @@ SaveChoice UiController::chooseSave(const std::string& slot, const std::string& 
             const std::string thereLabel = there.platform ? t("conflict.there") + " \xC2\xB7 " + platformName(*there.platform) : t("conflict.there");
             SaveCard thereCard = card(thereLabel, there.savedAt, there.sizeBytes, slot, read->bytes);
             const auto thereMs = detail::parseTimeMs(there.savedAt);
-            const bool hereNewer = thereMs && now >= *thereMs;
+            // The server's save time is read against the server's clock: a device clock that is off must not make the
+            // older save "Newer" (the one the player is steered to keep).
+            const bool hereNewer = thereMs && now + client_->serverOffsetMs().value_or(0) >= *thereMs;
             hereCard.newer = hereNewer;
             thereCard.newer = !hereNewer;
             UiScreen screen;

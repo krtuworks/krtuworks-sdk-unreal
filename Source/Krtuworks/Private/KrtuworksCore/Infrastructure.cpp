@@ -440,6 +440,20 @@ Answer send(HttpTransport& http, Clock& clock, const HttpCall& call)
         if (parsed && parsed->isObject()) answer.json = std::move(*parsed);
     }
     if (answer.json) clock.noteServerTime(answer.json->getString("serverTime"));
+    if (const auto header = answer.raw.header("retry-after"))
+    {
+        // A date, not a number of seconds: counted from the server's own `Date`, never from the device clock.
+        const auto text = trimSpace(*header);
+        if (!text.empty() && !infraDigit(text[0]))
+        {
+            if (const auto at = parseTimeMs(text))
+            {
+                const auto sent = answer.raw.header("date");
+                const auto sentAt = sent ? parseTimeMs(*sent) : std::nullopt;
+                answer.retryAfterHeader = static_cast<double>((std::max)(static_cast<std::int64_t>(0), *at - (sentAt ? *sentAt : clock.serverNowMs()))) / 1000.0;
+            }
+        }
+    }
     return answer;
 }
 
@@ -471,9 +485,10 @@ Error errorOf(const Answer& answer)
         if (const auto header = answer.raw.header("retry-after"))
         {
             const auto parsed = Json::parse(*header);
-            if (parsed && parsed->isNumber()) retryAfter = parsed->asDouble();
+            if (parsed && parsed->isNumber()) retryAfter = (std::max)(0.0, parsed->asDouble());
         }
     }
+    if (!retryAfter) retryAfter = answer.retryAfterHeader;
     return Error(code, message, answer.status, retryAfter, std::move(json));
 }
 
@@ -509,6 +524,7 @@ Resolved Resolved::from(const Options& o)
     r.appId = o.config.appId;
     r.slug = o.config.slug;
     r.type = o.config.type.empty() ? "GAME" : o.config.type;
+    r.firstLaunchOnline = o.config.firstLaunch == "online";
     r.environment = o.environment;
     r.platform = o.platform;
     r.build = o.build;

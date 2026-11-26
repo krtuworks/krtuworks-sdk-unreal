@@ -21,7 +21,7 @@ namespace KrtuworksPlatform
 
 	/**
 	 * The secrets (tokens, the device key): Windows DPAPI, macOS Keychain and Android Keystore seal files whose
-	 * key they keep; Linux and Steam Deck a key bound to the machine and user (owner's choice: one way for
+	 * key they keep; Linux and Steam Deck a key bound to the machine and user (one way for
 	 * desktop and game mode); iOS the Keychain itself, this device only. `Root` is the SDK's own folder (UTF-8).
 	 */
 	std::shared_ptr<krtu::KeyValueStore> MakeSecretStore(const std::string& Root, const std::string& AppId);

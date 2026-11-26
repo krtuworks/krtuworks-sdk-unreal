@@ -45,6 +45,7 @@ AppConfig AppConfig::fromJson(std::string_view text)
     config.appId = typesStringOr(*json, "appId");
     config.slug = typesStringOr(*json, "slug");
     config.type = typesStringOr(*json, "type", "GAME");
+    config.firstLaunch = typesStringOr(*json, "firstLaunch", "offline");
     const auto* environments = json->find("environments");
     if (environments != nullptr)
     {

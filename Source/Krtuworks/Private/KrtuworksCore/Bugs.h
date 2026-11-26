@@ -58,10 +58,15 @@ public:
     /// At a player's arrival: only when this device keeps a record for them (they reported here, or the app read their reports).
     void checkFixed();
     void resetBackoff();
+    /// Forgets everything kept for `owner` (the account is gone): waiting reports, history, the told-fixes record.
+    void drop(const std::string& owner);
 
 private:
     std::string prefix(const std::string& who) const;
     std::string fixedKey(const std::string& who) const;
+    /// What a failed send of one report calls for: the report is dropped (true: go on with the next) or kept with a
+    /// wait (false: the flush stops).
+    bool afterFailure(const Error& e, const std::string& key, const Json& w, std::int64_t now, BugFlushResult& result);
     void tellFixed(const std::string& who, const std::vector<BugReportView>& reports);
 
     const Resolved& opts_;

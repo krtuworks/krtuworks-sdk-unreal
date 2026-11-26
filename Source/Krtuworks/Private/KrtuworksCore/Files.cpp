@@ -15,6 +15,17 @@ constexpr auto filesPollLimit = std::chrono::seconds(60);
 /// How long after its last send an upload the server does not know can still arrive (an edge holds a whole
 /// request before it reaches the server). Past it, a save no one heard of is gone.
 constexpr std::int64_t filesArrivalWindowMs = 15LL * 60LL * 1000LL;
+/// A SETTINGS slot is written at most this often.
+constexpr std::int64_t filesSettingsGapMs = 30000;
+/// The wait after a 429 `too_many_writes` that names no Retry-After (the server allows one write per slot every 10 s).
+constexpr std::int64_t filesWriteLimitMs = 10000;
+/// The wait after a failure that can lift soon (no answer, a busy server).
+constexpr std::int64_t filesRetryMs = 30000;
+
+std::int64_t filesSteadyMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 Error filesReplaced()
 {
@@ -176,9 +187,9 @@ int Files::revision(const std::string& revisionKey) const
     return found == revisions_.end() ? 0 : found->second;
 }
 
-SlotList Files::list()
+SlotList Files::list(const std::optional<std::string>& owner)
 {
-    return listFor(std::nullopt);
+    return listFor(owner);
 }
 
 SlotList Files::listFor(const std::optional<std::string>& owner)
@@ -188,7 +199,7 @@ SlotList Files::listFor(const std::optional<std::string>& owner)
     return SlotList::fromJson(api_.player(filesPath(), call).body());
 }
 
-std::optional<FileRead> Files::read(const std::string& slot, const std::optional<SaveDevice>& device, const std::optional<std::string>& ifNoneMatch)
+std::optional<FileRead> Files::read(const std::string& slot, const std::optional<SaveDevice>& device, const std::optional<std::string>& ifNoneMatch, const std::optional<std::string>& owner)
 {
     const auto revisionKey = filesRevisionKey(slot, device ? std::optional<std::string>(device->id) : std::nullopt);
     const auto before = revision(revisionKey);
@@ -197,6 +208,7 @@ std::optional<FileRead> Files::read(const std::string& slot, const std::optional
     if (device) filesAddDevice(call.query, device->info);
     if (ifNoneMatch) call.headers.set("if-none-match", *ifNoneMatch);
     call.accept = {304};
+    call.owner = owner;
     const auto answer = api_.player(slotPath(slot), call);
     if (answer.status == 304) return std::nullopt;
     FileRead result;
@@ -215,17 +227,19 @@ std::optional<FileRead> Files::read(const std::string& slot, const std::optional
     return result;
 }
 
-FileVersion Files::save(const std::string& slot, const std::string& data, bool conditional, const std::optional<std::string>& baseVersion, const std::optional<SaveDevice>& device)
+PendingUpload Files::enqueue(const std::string& slot, const std::string& data, bool conditional, const std::optional<std::string>& baseVersion, const std::optional<SaveDevice>& device,
+                             const std::optional<std::string>& owner)
 {
-    const auto owner = subject_();
-    if (!owner) throw Error("signed_out", "No player is signed in.");
+    const auto playing = subject_();
+    if (!playing) throw Error("signed_out", "No player is signed in.");
+    if (owner && *owner != *playing) throw Error("context_changed", "The player changed; the save was not made.");
     {
         std::lock_guard<std::mutex> lock(revisionsMutex_);
         ++revisions_[filesRevisionKey(slot, device ? std::optional<std::string>(device->id) : std::nullopt)];
     }
     PendingUpload upload;
     upload.uploadId = uuidV4();
-    upload.owner = *owner;
+    upload.owner = *playing;
     upload.slot = slot;
     if (device)
     {
@@ -240,7 +254,145 @@ FileVersion Files::save(const std::string& slot, const std::string& data, bool c
     upload.seq = ++seq_;
     upload.v2 = true;
     putJson(store_, uploadKey(upload.uploadId), upload.toJson());
-    return pump(upload, [](const PendingUpload&, const std::string&, const std::optional<std::string>&) {});
+    return upload;
+}
+
+FileVersion Files::save(const std::string& slot, const std::string& data, bool conditional, const std::optional<std::string>& baseVersion, const std::optional<SaveDevice>& device,
+                        const std::optional<std::string>& owner)
+{
+    const auto upload = enqueue(slot, data, conditional, baseVersion, device, owner);
+    return pumpWatched(upload, [](const PendingUpload&, const std::string&, const std::optional<std::string>&) {});
+}
+
+FileVersion Files::saveSettings(const std::string& slot, const std::string& data, const std::optional<SaveDevice>& device)
+{
+    const auto upload = enqueue(slot, data, false, std::nullopt, device, std::nullopt);
+    const auto lane = laneLock(upload);
+    const auto now = filesSteadyMs();
+    {
+        std::lock_guard<std::mutex> lock(paceMutex_);
+        const auto last = lastSettingsAt_.find(lane);
+        if (last != lastSettingsAt_.end() && now - last->second < filesSettingsGapMs)
+        {
+            // Kept on the device; the newest content of the slot goes when its turn comes.
+            scheduled_[lane] = Scheduled{upload.uploadId, last->second + filesSettingsGapMs, true};
+            FileVersion waiting;
+            waiting.slot = slot;
+            waiting.device = upload.device;
+            waiting.sizeBytes = static_cast<std::int64_t>(data.size());
+            waiting.sha256 = upload.sha256;
+            waiting.savedAt = isoFromMs(upload.savedAt);
+            waiting.queued = true;
+            return waiting;
+        }
+        lastSettingsAt_[lane] = now;
+        scheduled_.erase(lane);
+    }
+    return pumpWatched(upload, [](const PendingUpload&, const std::string&, const std::optional<std::string>&) {});
+}
+
+FileVersion Files::pumpWatched(const PendingUpload& upload, const std::function<void(const PendingUpload&, const std::string&, const std::optional<std::string>&)>& tell)
+{
+    try
+    {
+        return pump(upload, tell);
+    }
+    catch (const Error& err)
+    {
+        retryLater(upload, err);
+        throw;
+    }
+}
+
+void Files::retryLater(const PendingUpload& upload, const Error& err)
+{
+    // A merged account's save waits for the player's choice (adoptWaiting or discardWaiting), not for a timer.
+    if (err.code() == "account_merged") return;
+    if (!err.waitsForLater() && err.code() != "upload_pending") return;
+    std::int64_t wait = filesRetryMs;
+    if (err.retryAfter()) wait = static_cast<std::int64_t>(*err.retryAfter() * 1000);
+    else if (err.status() == 429) wait = filesWriteLimitMs;
+    else if (Error::isWaitingCode(err.code()) || (err.authLayer() && !err.retryable())) wait = queueLongWaitMs;
+    schedule(laneLock(upload), upload.uploadId, wait, false);
+}
+
+void Files::schedule(const std::string& lane, const std::string& uploadId, std::int64_t afterMs, bool replace, bool coalesced)
+{
+    std::lock_guard<std::mutex> lock(paceMutex_);
+    const auto held = scheduled_.find(lane);
+    // A retry never takes the place of a newer save that waits already.
+    if (held != scheduled_.end() && !replace && held->second.uploadId != uploadId) return;
+    scheduled_[lane] = Scheduled{uploadId, filesSteadyMs() + afterMs, coalesced};
+}
+
+bool Files::scheduledDue()
+{
+    std::lock_guard<std::mutex> lock(paceMutex_);
+    const auto now = filesSteadyMs();
+    return std::any_of(scheduled_.begin(), scheduled_.end(), [now](const auto& entry) { return entry.second.dueMs <= now; });
+}
+
+std::vector<std::string> Files::sendScheduled(bool all)
+{
+    std::vector<std::pair<std::string, Scheduled>> due;
+    {
+        std::lock_guard<std::mutex> lock(paceMutex_);
+        const auto now = filesSteadyMs();
+        for (auto it = scheduled_.begin(); it != scheduled_.end();)
+        {
+            if ((all && it->second.coalesced) || it->second.dueMs <= now)
+            {
+                due.push_back(*it);
+                it = scheduled_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+    std::vector<std::string> sent;
+    const auto owner = subject_();
+    for (const auto& entry : due)
+    {
+        const auto json = getJson(store_, uploadKey(entry.second.uploadId));
+        const auto upload = json ? PendingUpload::fromJson(*json) : std::nullopt;
+        // Gone (finished or replaced elsewhere), or its player is away: the player's next arrival finishes it (resume).
+        if (!upload || !owner || upload->owner != *owner) continue;
+        {
+            std::lock_guard<std::mutex> lock(paceMutex_);
+            lastSettingsAt_[entry.first] = filesSteadyMs();
+        }
+        try
+        {
+            pumpWatched(*upload, [](const PendingUpload&, const std::string&, const std::optional<std::string>&) {});
+            if (!upload->device) sent.push_back(upload->slot);
+        }
+        catch (const Error&)
+        {
+            // pumpWatched scheduled it again when it can still go; a refusal for good ended it.
+        }
+    }
+    return sent;
+}
+
+void Files::dropOwner(const std::string& owner)
+{
+    std::set<std::string> gone;
+    for (const auto& name : store_.keys(uploadPrefix()))
+    {
+        const auto json = getJson(store_, name);
+        const auto upload = json ? PendingUpload::fromJson(*json) : std::nullopt;
+        if (!upload || upload->owner != owner) continue;
+        gone.insert(upload->uploadId);
+        forget(upload->uploadId);
+    }
+    std::lock_guard<std::mutex> lock(paceMutex_);
+    for (auto it = scheduled_.begin(); it != scheduled_.end();)
+    {
+        if (gone.count(it->second.uploadId) > 0) it = scheduled_.erase(it);
+        else ++it;
+    }
 }
 
 FileVersion Files::pump(const PendingUpload& target, const std::function<void(const PendingUpload&, const std::string&, const std::optional<std::string>&)>& tell)
@@ -302,7 +454,7 @@ std::pair<std::string, std::optional<std::string>> Files::settleEarlier(const Pe
         }
         catch (const Error& sent)
         {
-            if (!sent.retryable() && sent.code() != "upload_pending") return {"refused", sent.code()};
+            if (!sent.waitsForLater() && sent.code() != "upload_pending") return {"refused", sent.code()};
             throw;
         }
     }
@@ -355,6 +507,7 @@ FileVersion Files::send(const PendingUpload& upload)
     call.accept = {202};
     call.owner = upload.owner;
     // The sent time is written before the send: a call cut short must still count as possibly arrived.
+    const bool sentBefore = sentAt(upload).has_value();
     putJson(store_, sentKey(upload.uploadId), Json(nowMs()));
     Answer answer;
     try
@@ -363,7 +516,11 @@ FileVersion Files::send(const PendingUpload& upload)
     }
     catch (const Error& err)
     {
-        if (!err.retryable()) forget(upload.uploadId);
+        // A refusal of the save itself ends it. Anything that can lift (no answer, a busy server, a frozen app, a ban,
+        // a merge, a failed refresh) leaves it on the device to be sent again: it is never dropped for them.
+        if (!err.waitsForLater()) forget(upload.uploadId);
+        // A call that never left (the credentials failed first) was not sent at all.
+        else if (err.authLayer() && !sentBefore) store_.remove(sentKey(upload.uploadId));
         throw;
     }
     if (answer.status == 201)
@@ -386,7 +543,15 @@ FileVersion Files::settle(const PendingUpload& upload, Json state)
         if (status == std::optional<std::string>("REJECTED"))
         {
             forget(upload.uploadId);
-            throw Error(state.getString("code").value_or("write_failed"), "The save was refused.", 409, std::nullopt, Json::object({{"upload", state}}));
+            const auto code = state.getString("code").value_or("write_failed");
+            auto details = Json::object({{"upload", state}});
+            // An answer replayed from the upload's record does not carry the slot's current version: it is read for the
+            // game's choice screen.
+            if (code == "file_conflict")
+            {
+                if (const auto current = currentOf(upload)) details["current"] = *current;
+            }
+            throw Error(code, "The save was refused.", 409, std::nullopt, details);
         }
         if (std::chrono::steady_clock::now() - started > filesPollLimit)
             throw Error("upload_pending", "The save is still being written; it is finished on a later launch.", 202, std::nullopt, Json::object({{"uploadId", upload.uploadId}}));
@@ -398,6 +563,25 @@ FileVersion Files::settle(const PendingUpload& upload, Json state)
         poll.owner = upload.owner;
         state = api_.player(slotPath(upload.slot) + "/uploads/" + upload.uploadId, poll).body();
     }
+}
+
+std::optional<Json> Files::currentOf(const PendingUpload& upload)
+{
+    try
+    {
+        PlayerCall call;
+        call.owner = upload.owner;
+        const auto answer = api_.player(filesPath(), call);
+        for (const auto& slot : answer.body()["slots"].items())
+        {
+            if (slot.getString("key") == std::optional<std::string>(upload.slot) && slot["file"].isObject()) return slot["file"];
+        }
+    }
+    catch (const Error&)
+    {
+        // The refusal is told without it.
+    }
+    return std::nullopt;
 }
 
 FileVersion Files::done(const PendingUpload& upload, const std::optional<FileVersion>& file, const std::optional<std::string>& versionId)
@@ -453,12 +637,12 @@ std::vector<ResumedUpload> Files::resume()
         try
         {
             // Sent again with the same id and bytes: the server answers what the first one did.
-            pump(upload, tell);
+            pumpWatched(upload, tell);
             tell(upload, "saved", std::nullopt);
         }
         catch (const Error& err)
         {
-            const auto outcome = err.code() == "save_replaced" ? "replaced" : err.code() == "upload_pending" || err.retryable() ? "waiting" : "refused";
+            const auto outcome = err.code() == "save_replaced" ? "replaced" : err.code() == "upload_pending" || err.waitsForLater() ? "waiting" : "refused";
             tell(upload, outcome, err.code());
         }
     }
@@ -494,9 +678,10 @@ void Files::discardWaiting(const std::string& uploadId)
     forget(uploadId);
 }
 
-FileVersion Files::offer(const std::string& slot, const std::string& data, const std::string& current, const std::string& sessionId)
+FileVersion Files::offer(const std::string& slot, const std::string& data, const std::string& current, const std::string& sessionId, const std::optional<std::string>& owner)
 {
     PlayerCall call;
+    call.owner = owner;
     call.method = "PUT";
     call.headers.set("idempotency-key", uuidV4());
     call.headers.set("content-type", "application/octet-stream");
@@ -515,18 +700,21 @@ FileVersion Files::offer(const std::string& slot, const std::string& data, const
             throw Error("upload_pending", "The offer is still being written; the next sync looks again.", 202);
         opts_.delay(std::chrono::milliseconds(wait), CancelToken());
         wait = (std::min)(static_cast<std::int64_t>(8000), wait * 2);
-        state = api_.player(slotPath(slot) + "/uploads/" + state.getString("uploadId").value_or(""), PlayerCall()).body();
+        PlayerCall poll;
+        poll.owner = owner;
+        state = api_.player(slotPath(slot) + "/uploads/" + state.getString("uploadId").value_or(""), poll).body();
     }
-    for (const auto& view : list().slots)
+    for (const auto& view : list(owner).slots)
     {
         if (view.key == slot && view.conflict) return *view.conflict;
     }
     throw Error("file_not_found", "The offered copy is no longer waiting in the slot.", 404);
 }
 
-FileVersion Files::resolve(const std::string& slot, const std::string& keep, const std::string& current)
+FileVersion Files::resolve(const std::string& slot, const std::string& keep, const std::string& current, const std::optional<std::string>& owner)
 {
     PlayerCall call;
+    call.owner = owner;
     call.method = "POST";
     call.json = Json::object({{"keep", keep}, {"current", current}});
     const auto answer = api_.player(slotPath(slot) + "/resolve", call);

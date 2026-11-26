@@ -4,6 +4,31 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.8 - 2026-11-26
+
+### Fixed
+- A queued write is never dropped while the refusal can lift. An error from getting or refreshing the player's token (for example a frozen app answering `app_suspended` to the refresh) and the codes `app_suspended`, `account_merged`, `account_merging`, `sanctioned`, `account_deletion_pending`, `switched_off` and `module_disabled` keep the event batch, the bug report and its screenshot, and the save upload on the device; the next try waits for Retry-After, else 15 minutes. Before, a refused refresh deleted them. Only a refusal of the body itself drops it.
+- `account_deleted` (401) signs the player out (`signed_out`, reason `account_deleted`) and drops that player's queued events, progress, bug reports and saves.
+- A 200 answer for the remote config that is not a JSON object (a captive portal's page) is a failed fetch: the kept copy stays and nothing is stored.
+- A 409 `app_transferring` or `account_merging` on a bug report's screenshot keeps the screenshot for a later try. A stored screenshot that cannot be read is let go and the report is sent without it; an unexpected error in the report flush no longer stops the events after it.
+- A failed session open is tried again (growing wait, at once when the network is back), never given up for the rest of the run.
+- An open level attempt belongs to its player: after a player change `levelComplete`, `levelFail`, `levelCheckpoint` and `death` no longer count under the new player.
+- A score refused with `module_disabled` is parked for the rest of the flush instead of being sent again every round.
+- Events the store could not take stay in memory until it can; the event age limit and the Retry-After date use the server's clock (the offset the SDK keeps), not the device clock; the conflict screen's "Newer" mark too.
+- The Steam Cloud sync is bound to the player it started for: a player change mid-sync sends nothing under the new player.
+- A Steam ticket that was asked for and never sent (the call failed before it left) is cancelled. A Steam guest on a new PC is found by the ticket without the age screen; the server asks for the birth date only for a new Steam account.
+- A bug in the guest sign-in: the stored age answers are written under the lock; an age the server refused for good (`too_young`, `invalid_birth_date`) is no longer retried at every launch, and newer accepted terms replace the stored ones. Stale sign-in records are swept; a sign-out by another instance is reported.
+- A replayed `file_conflict` carries the slot's current version (`details()["current"]`), so the choice screen can open.
+- On shutdown the events kept in memory are written first, before waiting for the background loop.
+- Android: a device with no browser no longer crashes the game when sign-in opens the browser; the sign-in ends with `browser_unavailable`. A build from a clean checkout stops when `AppSlug` is missing from `DefaultGame.ini` instead of shipping a sign-in that cannot return.
+- iOS: a Keychain delete that fails is reported, so a sign-out cannot leave the tokens behind unnoticed.
+
+### Added
+- `IdentityChange` types `merging` and `merging_ended`: told once when the server is merging the player's account and once when calls go through again.
+- Settings saves (`saveSettings`) are written at most once every 30 seconds per slot; the newest content wins and goes when the app pauses or stops (`FileVersion::queued` while it waits). A `429 too_many_writes` is retried after Retry-After.
+- `firstLaunch: "online"` in `krtuworks-config.json`: `Gate::firstLaunchOffline` is set while the very first launch cannot reach the server, and `EnsurePlayer` shows "connect to play" with Try again.
+- `Client::serverOffsetMs()`, `PlatformServices::cancelWebApiTicket`, `Error::authLayer()` and `Error::waitsForLater()`.
+
 ## 1.0.7 - 2026-11-25
 
 ### Fixed

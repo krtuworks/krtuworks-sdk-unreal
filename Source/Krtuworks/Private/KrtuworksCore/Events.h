@@ -85,12 +85,16 @@ public:
     FlushResult flush(bool errorsOn, int maxBatches = 20);
     /// Lets the next flush try at once (back online, or the player changed).
     void resetBackoff();
+    /// Forgets everything kept for `owner` (the account is gone).
+    void drop(const std::string& owner);
 
 private:
     std::string key(const std::string& owner) const;
     EventQueueState load(const std::string& owner);
     void save(const std::string& owner, const EventQueueState& state);
-    static void trim(EventQueueState& state);
+    /// Drops what is past the age limit (by the server's clock: an event's own time corrected by the offset known when
+    /// it was made), then the oldest past the count and size limits.
+    void trim(EventQueueState& state) const;
     std::optional<FrozenBatch> freeze(EventQueueState& state, std::size_t limit) const;
     std::optional<WireEvent> droppedNotice(EventQueueState& state, bool errorsOn) const;
     std::string sendBatch(const std::string& owner, const FrozenBatch& batch, FlushResult& result);

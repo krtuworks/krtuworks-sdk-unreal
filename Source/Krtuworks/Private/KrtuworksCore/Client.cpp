@@ -60,7 +60,7 @@ struct Client::Impl
           api(options, identity, *http, clock),
           events(options, *store, clock, api, [this] { return subject(); }),
           progress(options, *store, api, [this] { return subject(); }),
-          sessions(options, api, [this] { return subject(); }, steamTicketSource()),
+          sessions(options, api, [this] { return subject(); }, steamTicketSource(), steamTicketCancel()),
           config(options, api, *store),
           files(
               options, api, *store, [this] { return subject(); }, [this] { return identity.generation(); }, [this] { quietly([this] { remindLinking("first_save"); }); }),
@@ -149,6 +149,12 @@ struct Client::Impl
         return [this] { return platform->webApiTicket(); };
     }
 
+    std::function<void(const std::string&)> steamTicketCancel()
+    {
+        if (!steamOn()) return nullptr;
+        return [this](const std::string& ticket) { platform->cancelWebApiTicket(ticket); };
+    }
+
     std::optional<std::string> subject() const
     {
         const auto current = identity.player();
@@ -165,6 +171,17 @@ struct Client::Impl
 
     void onIdentityChanged(const IdentityChange& change)
     {
+        // A merge in progress changes nobody: the game is only told.
+        if (change.type == "merging" || change.type == "merging_ended")
+        {
+            std::function<void(const IdentityChange&)> told;
+            {
+                std::lock_guard<std::mutex> lock(handlersMutex);
+                told = identityChanged;
+            }
+            if (told) quietly([&told, &change] { told(change); });
+            return;
+        }
         if (change.type == "merged" || change.type == "signed_out" || change.type == "deletion_pending" || change.type == "sanctioned")
         {
             sessions.close();
@@ -214,6 +231,8 @@ struct Client::Impl
         const auto current = identity.player();
         if (!current)
         {
+            // A game that needs the server on its very first launch asks it now, and says so when it cannot.
+            if (options.firstLaunchOnline && !config.hasCopy()) quietly([this] { refreshConfig(); });
             if (identity.meta().guestRequest) quietly([this] { signInAsGuest(std::nullopt, std::nullopt); });
             return;
         }
@@ -318,6 +337,32 @@ struct Client::Impl
             }
             if (handler) quietly([&handler, &settled] { handler(settled); });
         }
+    }
+
+    /// Asks the server for the config; a failed first launch of a game that needs the server is remembered (the
+    /// gate says so) until the server answers.
+    bool refreshConfig()
+    {
+        try
+        {
+            const auto changed = config.refresh();
+            firstLaunchOffline.store(false);
+            return changed;
+        }
+        catch (const Error&)
+        {
+            if (options.firstLaunchOnline && !config.hasCopy() && !identity.player()) firstLaunchOffline.store(true);
+            throw;
+        }
+    }
+
+    /// An account that is gone: nothing of it is sent again.
+    void dropOwner(const std::string& owner)
+    {
+        events.drop(owner);
+        progress.drop(owner);
+        bugs.drop(owner);
+        files.dropOwner(owner);
     }
 
     // ── Telemetry ────────────────────────────────────────────────────────
@@ -682,6 +727,12 @@ struct Client::Impl
         return result;
     }
 
+    /// The settings slots a scheduled send just finished are lined up with the platform's cloud.
+    void sentSettings(const std::vector<std::string>& slots)
+    {
+        for (const auto& slot : slots) mirrorFiles(slot);
+    }
+
     void tick()
     {
         const auto now = uptimeMs();
@@ -690,11 +741,13 @@ struct Client::Impl
         });
         if (events.persistDue()) quietly([this] { events.persist(); });
         if (statMirror) quietly([this] { statMirror->store(false); });
+        if (options.sessions && config.moduleOn("sessions")) sessions.retryOpen();
+        if (files.scheduledDue()) quietly([this] { sentSettings(files.sendScheduled(false)); });
         if (now >= flushSoonAt.load() || now - lastFlushAt.load() >= clientFlushMs) quietly([this] { flush(); });
         if (now - lastConfigAt.load() >= clientConfigMs)
         {
             lastConfigAt.store(now);
-            quietly([this] { config.refresh(); });
+            quietly([this] { refreshConfig(); });
             quietly([this] { presence.refresh(); });
         }
     }
@@ -720,9 +773,13 @@ struct Client::Impl
             stopping.store(true);
         }
         loopWake.notify_all();
+        // What waits in memory reaches the store first: the loop thread may be inside a long call, and the caller may not
+        // wait for it.
+        quietly([this] { events.persist(); });
         if (loopThread.joinable() && loopThread.get_id() != std::this_thread::get_id()) loopThread.join();
         levels.finish("quit", std::nullopt);
         quietly([this] { events.persist(); });
+        quietly([this] { files.sendScheduled(true); });
         if (statMirror) quietly([this] { statMirror->store(true); });
         sessions.end();
         settler.stop();
@@ -752,6 +809,7 @@ struct Client::Impl
     std::chrono::steady_clock::time_point started;
 
     std::atomic<bool> optedOut{false};
+    std::atomic<bool> firstLaunchOffline{false};
     std::mutex experimentsMutex;
     std::map<std::string, Json> experiments;
     std::mutex stateMutex;
@@ -798,6 +856,7 @@ std::unique_ptr<Client> Client::initialize(Options options)
     impl.sessionOwner = loaded ? std::optional<std::string>(loaded->subject) : std::nullopt;
     impl.config.load();
     impl.identity.addListener([&impl](const IdentityChange& change) { impl.onIdentityChanged(change); });
+    impl.identity.setDeletedHandler([&impl](const std::string& owner) { impl.dropOwner(owner); });
     const auto now = impl.uptimeMs();
     impl.lastFlushAt.store(now);
     // The server's config is asked for on the first beat of the loop, not before the game can go on.
@@ -1149,7 +1208,7 @@ bool Client::ownsDlc(const std::string& key)
 
 void Client::refreshConfig()
 {
-    impl_->config.refresh();
+    impl_->refreshConfig();
 }
 
 Gate Client::getGate() const
@@ -1161,6 +1220,7 @@ Gate Client::getGate() const
     gate.maintenanceMessage = maintenance.getString("message");
     gate.updateRequired = minVersion.isString() && RemoteConfig::olderThan(impl_->options.build, minVersion.asString());
     gate.switchedOff = impl_->config.switchForBuild();
+    gate.firstLaunchOffline = impl_->firstLaunchOffline.load() && !impl_->identity.player();
     return gate;
 }
 
@@ -1233,8 +1293,8 @@ FileVersion Client::saveFile(const std::string& slot, const std::string& data, c
 
 FileVersion Client::saveSettings(const std::string& slot, const std::string& data, const std::optional<SaveDevice>& device)
 {
-    auto saved = impl_->files.save(slot, data, false, std::nullopt, device);
-    if (!device) impl_->settler.post([impl = impl_.get(), slot] { impl->mirrorFiles(slot); });
+    auto saved = impl_->files.saveSettings(slot, data, device);
+    if (!device && !saved.queued) impl_->settler.post([impl = impl_.get(), slot] { impl->mirrorFiles(slot); });
     return saved;
 }
 
@@ -1307,6 +1367,8 @@ void Client::setForeground(bool foreground)
     if (foreground) return;
     quietly([this] { impl_->events.persist(); });
     if (impl_->statMirror) quietly([this] { impl_->statMirror->store(true); });
+    // The app may not come back: a settings save that waits for its turn goes now.
+    impl_->settler.post([impl = impl_.get()] { quietly([impl] { impl->sentSettings(impl->files.sendScheduled(true)); }); });
 }
 
 void Client::online()
@@ -1314,7 +1376,16 @@ void Client::online()
     impl_->events.resetBackoff();
     impl_->progress.resetBackoff();
     impl_->bugs.resetBackoff();
-    impl_->settler.post([this] { impl_->flush(); });
+    impl_->sessions.resetOpenBackoff();
+    impl_->settler.post([this] {
+        quietly([this] { impl_->sentSettings(impl_->files.sendScheduled(true)); });
+        impl_->flush();
+    });
+}
+
+std::optional<std::int64_t> Client::serverOffsetMs() const
+{
+    return impl_->clock.serverOffsetMs();
 }
 
 void Client::tick()

@@ -117,7 +117,7 @@ private:
     std::string macKey_;
 };
 
-/// Linux and Steam Deck (the owner chose one way for desktop and game mode alike): the sealing key is bound
+/// Linux and Steam Deck (one way for desktop and game mode alike): the sealing key is bound
 /// to this machine, this user and this app (`/etc/machine-id`, the uid, the app id), so sealed files copied
 /// to another machine or user do not open. A machine without a machine id keeps a random key in an
 /// owner-only file of `files` instead.

@@ -47,6 +47,13 @@ void RemoteConfig::load()
     etag_ = kept->getString("etag");
     const auto& value = (*kept)["value"];
     value_ = value.isObject() ? value : Json::object();
+    copy_ = true;
+}
+
+bool RemoteConfig::hasCopy() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return copy_;
 }
 
 bool RemoteConfig::refresh()
@@ -61,8 +68,10 @@ bool RemoteConfig::refresh()
     }
     const auto answer = api_.open("/v1/apps/" + urlEncode(opts_.slug) + "/config", call);
     if (answer.status == 304) return false;
+    // A 2xx that is not a JSON object (a captive portal's page, a proxy's answer) is a failed fetch: the kept copy stays.
+    if (!answer.json) throw Error("invalid_response", "The config answer is not a JSON object.", answer.status);
     const auto etag = answer.raw.header("etag");
-    const auto& value = answer.body();
+    const auto& value = *answer.json;
     auto stored = Json::object();
     if (etag) stored["etag"] = *etag;
     stored["value"] = value;
@@ -70,6 +79,7 @@ bool RemoteConfig::refresh()
     std::lock_guard<std::mutex> lock(mutex_);
     etag_ = etag;
     value_ = value;
+    copy_ = true;
     return true;
 }
 

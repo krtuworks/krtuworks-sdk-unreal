@@ -14,6 +14,12 @@ Error::Error(std::string code, std::string message, int status, std::optional<do
 {
 }
 
+bool Error::isWaitingCode(const std::string& code) noexcept
+{
+    return code == "app_suspended" || code == "account_merged" || code == "account_merging" || code == "sanctioned" || code == "account_deletion_pending" || code == "switched_off" ||
+           code == "module_disabled";
+}
+
 void CancelToken::throwIfCancelled() const
 {
     if (cancelled()) throw Cancelled();

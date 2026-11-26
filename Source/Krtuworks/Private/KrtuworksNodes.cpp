@@ -19,7 +19,7 @@ namespace
 {
 	krtu::Json VersionJson(const krtu::FileVersion& Version)
 	{
-		krtu::Json Out = krtu::Json::object({{"id", Version.id}, {"slot", Version.slot}, {"generation", Version.generation}, {"sizeBytes", Version.sizeBytes}, {"sha256", Version.sha256}, {"savedAt", Version.savedAt}, {"fromMerge", Version.fromMerge}});
+		krtu::Json Out = krtu::Json::object({{"id", Version.id}, {"slot", Version.slot}, {"generation", Version.generation}, {"sizeBytes", Version.sizeBytes}, {"sha256", Version.sha256}, {"savedAt", Version.savedAt}, {"fromMerge", Version.fromMerge}, {"queued", Version.queued}});
 		if (Version.device)
 		{
 			Out["device"] = *Version.device;

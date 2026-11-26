@@ -134,6 +134,16 @@ public:
     /// The server said the player's account went into another one (401 account_merged). Always throws account_merged.
     [[noreturn]] void markMerged(const std::string& previousSubject, const std::optional<std::string>& mergedInto);
 
+    /// The server said the player's account is gone (401 account_deleted): the player signs out (reason
+    /// `account_deleted`) and the deleted-account handler drops that owner's queues. Always throws account_deleted.
+    [[noreturn]] void markDeleted(const std::string& subject);
+    /// Heard when an account is gone, for that owner (the current player or one a queued call was made for).
+    void setDeletedHandler(std::function<void(const std::string&)> handler);
+    /// The server answered 409 account_merging for the player's call: the game is told once per episode.
+    void noteMerging(const std::string& subject);
+    /// A call of the player's went through after a merging episode: the game is told once that it ended.
+    void noteMergeEnded(const std::string& subject);
+
     /// A proof by this device's guest key for one of the guest's own calls (deletion, data copy).
     std::string guestProof(const std::string& purpose);
     /// Plays as a guest (or, on Steam, as the Steam account's player). A new guest needs the age screen's
@@ -180,10 +190,13 @@ private:
     StoredTokens refresh(const std::string& usedAccess);
     StoredTokens refused(const StoredTokens& stored, const Error& err);
     [[noreturn]] void markMergedLocked(const std::string& previousSubject, const std::optional<std::string>& mergedInto);
+    [[noreturn]] void markDeletedLocked(const std::string& subject);
     std::string challenge(const std::string& purpose);
     std::string proofWith(const DeviceKey& deviceKey, const std::string& purpose);
     std::pair<StoredTokens, bool> guestGrant(const std::optional<GuestRequest>& request, const std::optional<std::string>& steamTicket);
     StoredTokens guestAgain(const StoredTokens& stored);
+    /// A Steam ticket that was asked for and never sent is cancelled.
+    void discardTicket(const std::optional<std::string>& ticket);
     void checkIdToken(const Answer& answer, const std::string& nonce) const;
     static Player playerOf(const StoredTokens& tokens);
 
@@ -199,5 +212,7 @@ private:
     SingleFlight<StoredTokens> refreshing_;
     std::mutex listenersMutex_;
     std::vector<Listener> listeners_;
+    std::function<void(const std::string&)> deletedHandler_;
+    std::atomic<bool> merging_{false};
 };
 }  // namespace krtu::detail

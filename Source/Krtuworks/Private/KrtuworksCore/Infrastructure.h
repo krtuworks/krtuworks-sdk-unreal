@@ -181,6 +181,9 @@ struct Answer
     int status = 0;
     HttpAnswer raw;
     std::optional<Json> json;
+    /// The `Retry-After` header in seconds: a number as it is, an HTTP date against the server's own `Date` (or the
+    /// server clock offset the SDK keeps), never the device clock; nothing when the header is absent or unreadable.
+    std::optional<double> retryAfterHeader;
 
     const Json& body() const;
 };
@@ -204,6 +207,8 @@ struct Resolved
     std::string appId;
     std::string slug;
     std::string type;
+    /// The very first launch needs the server (`firstLaunch` `online`).
+    bool firstLaunchOnline = false;
     std::string environment;
     std::string platform;
     std::string build;

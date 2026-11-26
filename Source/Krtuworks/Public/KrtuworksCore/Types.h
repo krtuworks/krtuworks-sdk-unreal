@@ -39,6 +39,9 @@ struct KRTU_API AppConfig
     /// GAME, MOBILE_APP, WEB_APP or DESKTOP_APP. The game-only parts (levels, deaths, Steam) stay off in the
     /// other kinds. A file made before the field existed is a game's.
     std::string type = "GAME";
+    /// `offline` (default): the first launch plays without a connection. `online`: the very first launch needs the
+    /// server (no account yet and nothing kept from it); without it Gate::firstLaunchOffline is set.
+    std::string firstLaunch = "offline";
     std::map<std::string, EnvironmentClients> environments;
 
     /// Reads the file's text; std::invalid_argument when it is not a krtuworks-config.json.
@@ -177,6 +180,9 @@ public:
     virtual PlatformOwnership* ownership() { return nullptr; }
     /// A fresh web API ticket for the `krtuworks-id` identity (Steam's GetAuthTicketForWebApi, hex), or nothing.
     virtual std::optional<std::string> webApiTicket() = 0;
+    /// A ticket webApiTicket() gave that was never sent to the server (the call failed before it left): it stops being
+    /// valid. A ticket that was sent is never cancelled here. Nothing by default.
+    virtual void cancelWebApiTicket(const std::string& ticket) { (void)ticket; }
     /// The platform's ids of the achievements the player has unlocked there.
     virtual std::vector<std::string> unlockedAchievements() = 0;
     /// Unlocks an achievement on the platform by its platform id.
@@ -232,7 +238,9 @@ struct KRTU_API Player
     std::optional<std::string> picture;
 };
 
-/// signed_in · guest · signed_out · merged · deletion_pending · sanctioned
+/// signed_in · guest · signed_out · merged · deletion_pending · sanctioned · merging (the server is merging the
+/// player's account: calls wait, told once) · merging_ended (the first call that went through after it, told once).
+/// `signed_out` carries `reason` `account_deleted` when the server said the account is gone.
 struct KRTU_API IdentityChange
 {
     std::string type;
@@ -270,6 +278,9 @@ struct KRTU_API Gate
     /// The owner's minimum version is newer than this build: the player must update from the store.
     bool updateRequired = false;
     std::optional<BuildSwitch> switchedOff;
+    /// `firstLaunch` is `online` in krtuworks-config.json and the very first launch cannot reach the server: the game
+    /// shows "connect to play" and tries again (Client::refreshConfig). Cleared by the first answer of the server.
+    bool firstLaunchOffline = false;
 };
 
 struct KRTU_API StatView
@@ -530,6 +541,9 @@ struct KRTU_API FileVersion
     bool fromMerge = false;
     /// The platform whose cloud this copy came from (STEAM): it waits as a slot's `conflict` for the player's choice.
     std::optional<std::string> platformCloud;
+    /// Set by Client::saveSettings when the write waits for its turn (a slot is written at most every 30 seconds): the
+    /// content is kept on the device and sent later, the newest of the slot first; `id` is empty until then.
+    bool queued = false;
 
     static FileVersion fromJson(const Json& json);
 };

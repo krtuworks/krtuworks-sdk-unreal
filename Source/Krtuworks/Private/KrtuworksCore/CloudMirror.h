@@ -31,7 +31,9 @@ enum class MirrorStep
 /// stays off for those files. SAVE, PROFILE and SETTINGS are mirrored, DEVICE_SETTINGS never. Per slot three
 /// hashes decide (decide()): H the server's, S the platform's, L the last both sides agreed on, on this device,
 /// for this player and platform account. A slot the platform has no room for (or refused) is left alone for the
-/// session; the game never sees an error and the server's copy is never touched by a platform failure. The
+/// session; the game never sees an error and the server's copy is never touched by a platform failure. Every call
+/// to the server goes with the token of the player the sync is for (`owner`): when another player takes over mid-sync,
+/// the call is not sent and the sync ends. The
 /// syncs run one after another (a choice's sync must not be swallowed by one already running). Any thread.
 class CloudMirror
 {
@@ -63,9 +65,9 @@ private:
     Agreed loadAgreed(const std::string& key);
     void saveAgreed(const std::string& key, const Agreed& agreed);
     void syncOnce(const std::string& owner, const std::string& account, const std::string& sessionId, const std::optional<std::string>& only, std::vector<PlatformSaveConflict>& raised);
-    void syncSlot(const SlotView& slot, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised);
-    void toPlatform(const std::string& slot, const std::string& h, const std::optional<PlatformCloudFile>& onPlatform, Agreed& agreed);
-    void offer(const SlotView& slot, const PlatformCloudFile& onPlatform, const std::string& s, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised);
+    void syncSlot(const std::string& owner, const SlotView& slot, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised);
+    void toPlatform(const std::string& owner, const std::string& slot, const std::string& h, const std::optional<PlatformCloudFile>& onPlatform, Agreed& agreed);
+    void offer(const std::string& owner, const SlotView& slot, const PlatformCloudFile& onPlatform, const std::string& s, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised);
     void tell(const std::vector<PlatformSaveConflict>& raised) const;
 
     PlatformCloud& cloud_;

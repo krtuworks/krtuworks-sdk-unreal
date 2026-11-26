@@ -78,7 +78,12 @@ namespace
 
 		void remove(const std::string& Key) override
 		{
-			SecItemDelete((__bridge CFDictionaryRef)IosQuery(Service, &Key));
+			// A locked Keychain that keeps the item would bring the tokens back on the next launch: not silent.
+			const OSStatus Status = SecItemDelete((__bridge CFDictionaryRef)IosQuery(Service, &Key));
+			if (Status != errSecSuccess && Status != errSecItemNotFound)
+			{
+				throw krtu::Error("secret_storage_unavailable", "The Keychain could not remove the item (" + std::to_string(static_cast<int>(Status)) + ").");
+			}
 		}
 
 		std::vector<std::string> keys(const std::string& Prefix) override

@@ -34,6 +34,8 @@ private:
     struct Attempt
     {
         LevelRef level;
+        /// The player the attempt belongs to; the anonymous owner until the first player exists.
+        std::string owner;
         std::int64_t number = 0;
         std::chrono::steady_clock::time_point since;
         std::int64_t activeAtStart = 0;
@@ -41,6 +43,9 @@ private:
     };
 
     std::string key() const;
+    /// Under `mutex_`: the attempt in play when it is the current player's. One that belongs to another player is
+    /// dropped without a word (nothing is told under the new owner); one made before any player moves to the first.
+    std::optional<Attempt>& ownedLocked() const;
     Json times(const Attempt& attempt, Json into) const;
 
     KeyValueStore& store_;
@@ -49,6 +54,6 @@ private:
     std::function<std::int64_t()> activeSeconds_;
     std::function<void(const Json&)> emit_;
     mutable std::mutex mutex_;
-    std::optional<Attempt> current_;
+    mutable std::optional<Attempt> current_;
 };
 }  // namespace krtu::detail

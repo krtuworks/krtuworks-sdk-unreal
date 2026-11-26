@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <stdexcept>
 
@@ -19,10 +20,15 @@ namespace
 	/** Back in the app with no address this long after it came back = the player closed the browser. */
 	constexpr auto NoAddressAfterResume = std::chrono::seconds(2);
 
+	/**
+	 * The one open sign-in page. Each call takes a new generation; a newer sign-in replaces the open one,
+	 * and the replaced call ends as cancelled instead of taking the newer call's address.
+	 */
 	struct FAndroidSignIn
 	{
 		std::mutex Mutex;
 		std::condition_variable Arrived;
+		std::uint64_t Generation = 0;
 		std::string Scheme;
 		std::string Address;
 		bool bWaiting = false;
@@ -156,24 +162,53 @@ namespace KrtuworksPlatform
 	std::string AuthenticateOnPhone(const std::string& Url, const std::string& Scheme, const krtu::CancelToken& Cancel)
 	{
 		FAndroidSignIn& State = SignIn();
+		std::uint64_t Mine = 0;
 		{
 			std::lock_guard<std::mutex> Lock(State.Mutex);
+			Mine = ++State.Generation;
 			State.Scheme = Scheme;
 			State.Address.clear();
 			State.bWaiting = true;
 			State.bResumed = false;
 		}
+		bool bOpened = false;
 		{
 			JNIEnv* Env = FAndroidApplication::GetJavaEnv();
-			const jmethodID Open = Env->GetStaticMethodID(HelperClass(), "openBrowser", "(Landroid/app/Activity;Ljava/lang/String;)V");
+			const jmethodID Open = Env->GetStaticMethodID(HelperClass(), "openBrowser", "(Landroid/app/Activity;Ljava/lang/String;)Z");
 			jstring Address = Env->NewStringUTF(Url.c_str());
-			Env->CallStaticVoidMethod(HelperClass(), Open, FJavaWrapper::GameActivityThis, Address);
+			bOpened = Env->CallStaticBooleanMethod(HelperClass(), Open, FJavaWrapper::GameActivityThis, Address) == JNI_TRUE;
 			Env->DeleteLocalRef(Address);
+			if (Env->ExceptionCheck())
+			{
+				Env->ExceptionClear();
+				bOpened = false;
+			}
+		}
+		if (!bOpened)
+		{
+			std::lock_guard<std::mutex> Lock(State.Mutex);
+			if (State.Generation == Mine)
+			{
+				State.bWaiting = false;
+			}
+			throw krtu::Error("browser_unavailable", "No browser could be opened for the sign-in.");
 		}
 		std::unique_lock<std::mutex> Lock(State.Mutex);
-		while (State.Address.empty())
+		while (true)
 		{
+			if (State.Generation != Mine)
+			{
+				throw krtu::Cancelled();
+			}
+			if (!State.Address.empty())
+			{
+				break;
+			}
 			State.Arrived.wait_for(Lock, std::chrono::milliseconds(100));
+			if (State.Generation != Mine)
+			{
+				throw krtu::Cancelled();
+			}
 			const bool bClosed = State.bResumed && std::chrono::steady_clock::now() - State.ResumedAt > NoAddressAfterResume;
 			if (State.Address.empty() && (Cancel.cancelled() || bClosed))
 			{
@@ -182,7 +217,9 @@ namespace KrtuworksPlatform
 			}
 		}
 		State.bWaiting = false;
-		return State.Address;
+		std::string Out = State.Address;
+		State.Address.clear();
+		return Out;
 	}
 
 	std::optional<std::string> LaunchAddress()

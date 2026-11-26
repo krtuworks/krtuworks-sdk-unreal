@@ -32,6 +32,16 @@ std::string ProgressionTracker::key() const
     return "krtu:" + clientId_ + ":levels:" + owner_();
 }
 
+std::optional<ProgressionTracker::Attempt>& ProgressionTracker::ownedLocked() const
+{
+    if (!current_) return current_;
+    const auto who = owner_();
+    if (current_->owner == who) return current_;
+    if (current_->owner == anonOwner) current_->owner = who;
+    else current_.reset();
+    return current_;
+}
+
 Json ProgressionTracker::times(const Attempt& attempt, Json into) const
 {
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - attempt.since).count();
@@ -53,7 +63,7 @@ void ProgressionTracker::start(const LevelRef& level)
     putJson(store_, key(), counts);
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        current_ = Attempt{level, number, std::chrono::steady_clock::now(), activeSeconds_(), 0};
+        current_ = Attempt{level, owner_(), number, std::chrono::steady_clock::now(), activeSeconds_(), 0};
     }
     auto data = progressionPlace(level, "start");
     data["attempt"] = number;
@@ -65,7 +75,7 @@ void ProgressionTracker::finish(const std::string& action, const std::optional<d
     std::optional<Attempt> attempt;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        attempt.swap(current_);
+        ownedLocked().swap(attempt);
     }
     if (!attempt) return;
     auto data = times(*attempt, progressionPlace(attempt->level, action));
@@ -78,7 +88,7 @@ void ProgressionTracker::checkpoint(const std::string& name)
     std::optional<Attempt> attempt;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        attempt = current_;
+        attempt = ownedLocked();
     }
     if (!attempt) return;
     auto data = times(*attempt, progressionPlace(attempt->level, "checkpoint"));
@@ -91,7 +101,7 @@ void ProgressionTracker::restart()
     std::optional<Attempt> attempt;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        attempt.swap(current_);
+        ownedLocked().swap(attempt);
     }
     if (!attempt) return;
     emit_(times(*attempt, progressionPlace(attempt->level, "restart")));
@@ -101,7 +111,7 @@ void ProgressionTracker::restart()
 std::optional<LevelRef> ProgressionTracker::noteDeath()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!current_) return std::nullopt;
+    if (!ownedLocked()) return std::nullopt;
     ++current_->deaths;
     return current_->level;
 }
@@ -109,7 +119,7 @@ std::optional<LevelRef> ProgressionTracker::noteDeath()
 std::optional<LevelRef> ProgressionTracker::inPlay() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!current_) return std::nullopt;
+    if (!ownedLocked()) return std::nullopt;
     return current_->level;
 }
 }  // namespace krtu::detail

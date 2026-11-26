@@ -46,14 +46,32 @@ class Files
 public:
     Files(const Resolved& opts, Api& api, KeyValueStore& store, std::function<std::optional<std::string>()> subject, std::function<int()> generation, std::function<void()> onSaved);
 
-    SlotList list();
-    /// A slot's current version; nothing when `ifNoneMatch` (a version id held) is still current.
-    std::optional<FileRead> read(const std::string& slot, const std::optional<SaveDevice>& device, const std::optional<std::string>& ifNoneMatch);
+    /// The slots of `owner` (default: whoever plays); the call goes only with that player's token.
+    SlotList list(const std::optional<std::string>& owner = std::nullopt);
+    /// A slot's current version; nothing when `ifNoneMatch` (a version id held) is still current. `owner`: the
+    /// player the read is for (default: whoever plays); another player's token is never used.
+    std::optional<FileRead> read(const std::string& slot, const std::optional<SaveDevice>& device, const std::optional<std::string>& ifNoneMatch,
+                                 const std::optional<std::string>& owner = std::nullopt);
     /// Saves a new version of `slot`. Returns the new version once the server activated it; throws
     /// `file_conflict` (`details()["current"]`: the version now in the slot) when another one came first, and
     /// `save_replaced` when a newer save of the slot took its place before it was sent.
     /// `conditional`: whether `baseVersion` is meant (none = the slot must be empty); SETTINGS-like slots need neither.
-    FileVersion save(const std::string& slot, const std::string& data, bool conditional, const std::optional<std::string>& baseVersion, const std::optional<SaveDevice>& device);
+    /// `owner`: the player the save is for; `context_changed` when another one plays (default: whoever plays).
+    FileVersion save(const std::string& slot, const std::string& data, bool conditional, const std::optional<std::string>& baseVersion, const std::optional<SaveDevice>& device,
+                     const std::optional<std::string>& owner = std::nullopt);
+    /// A SETTINGS or DEVICE_SETTINGS save: a slot is written at most once every 30 seconds. The first save goes at
+    /// once; one that comes sooner is kept on the device (the newest content of the slot wins) and sent when its
+    /// turn comes (sendScheduled), at the latest when the app pauses or ends. The answer of such a save is not a
+    /// version yet: `queued` is set and `id` is empty.
+    FileVersion saveSettings(const std::string& slot, const std::string& data, const std::optional<SaveDevice>& device);
+    /// Sends the saves whose turn has come (a settings save that waited, a save a 429 or a waiting refusal held back);
+    /// with `all`, every settings save that waits for its turn goes now too (a retry keeps the server's wait). Returns the keys of the slots that were sent. Never throws: a send that
+    /// fails again is scheduled once more.
+    std::vector<std::string> sendScheduled(bool all);
+    /// Whether a scheduled save is due now.
+    bool scheduledDue();
+    /// Forgets every save kept for `owner` (the account is gone).
+    void dropOwner(const std::string& owner);
     /// Saves left unfinished by an earlier launch (an answer lost, a 202, made offline): finishes the signed-in
     /// player's, the newest of each slot (and device) last; an older one never sent is replaced.
     std::vector<ResumedUpload> resume();
@@ -68,9 +86,9 @@ public:
     /// slot's version `current`; `sessionId` proves the platform account). Returns the waiting version. Not kept
     /// in the store: an offer lost is made again on the next sync, and the server answers `conflict_pending` for
     /// one already waiting.
-    FileVersion offer(const std::string& slot, const std::string& data, const std::string& current, const std::string& sessionId);
+    FileVersion offer(const std::string& slot, const std::string& data, const std::string& current, const std::string& sessionId, const std::optional<std::string>& owner = std::nullopt);
     /// After a merge: keep `keep` (the slot's version or the merged one) over `current` (the one the player saw).
-    FileVersion resolve(const std::string& slot, const std::string& keep, const std::string& current);
+    FileVersion resolve(const std::string& slot, const std::string& keep, const std::string& current, const std::optional<std::string>& owner = std::nullopt);
 
 private:
     std::string filesPath() const;
@@ -88,6 +106,15 @@ private:
     /// The store's uploads of `upload`'s lane, oldest first.
     std::vector<PendingUpload> lane(const PendingUpload& upload);
     SlotList listFor(const std::optional<std::string>& owner);
+    /// Writes a save to the store (it survives the app closing) and counts it for the slot's reads.
+    PendingUpload enqueue(const std::string& slot, const std::string& data, bool conditional, const std::optional<std::string>& baseVersion, const std::optional<SaveDevice>& device,
+                          const std::optional<std::string>& owner);
+    /// pump(), and a failure that can lift schedules the save for another try.
+    FileVersion pumpWatched(const PendingUpload& upload, const std::function<void(const PendingUpload&, const std::string&, const std::optional<std::string>&)>& tell);
+    void retryLater(const PendingUpload& upload, const Error& err);
+    void schedule(const std::string& lane, const std::string& uploadId, std::int64_t afterMs, bool replace, bool coalesced = false);
+    /// The slot's current version as the server's JSON, for a refusal that has to name it.
+    std::optional<Json> currentOf(const PendingUpload& upload);
     /// Sends `target` in its lane's order. An earlier save of the lane that was never sent is replaced by the
     /// newer one; an earlier save that was sent is settled first (asked how it ended, or sent again with its
     /// id), so an older copy never lands after a newer one. `target` itself is replaced when a newer save of
@@ -113,5 +140,18 @@ private:
     std::map<std::string, int> revisions_;
     /// Orders the saves started in one millisecond.
     std::atomic<std::int64_t> seq_{0};
+    struct Scheduled
+    {
+        std::string uploadId;
+        /// On the steady clock.
+        std::int64_t dueMs = 0;
+        /// A settings save waiting for its slot's turn (it may go early when the app pauses); otherwise a retry after a
+        /// refusal, which keeps the server's wait.
+        bool coalesced = false;
+    };
+    /// Per lane: when a settings save was last sent, and the newest save waiting for its turn.
+    std::mutex paceMutex_;
+    std::map<std::string, std::int64_t> lastSettingsAt_;
+    std::map<std::string, Scheduled> scheduled_;
 };
 }  // namespace krtu::detail

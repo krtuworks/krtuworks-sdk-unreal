@@ -127,10 +127,13 @@ public:
     /// Sends the signed-in player's ops until nothing waits or a send fails. Answers per op: applied and
     /// duplicate end the op; a refusal for good ends it too (and everything waiting for a stat, achievement or
     /// leaderboard that no longer exists); `module_disabled` on a score and anything else keep it frozen for
-    /// the next flush.
+    /// the next flush. A score op refused with `module_disabled` is parked for the rest of the flush (it stays
+    /// frozen, and the flush says `stoppedBy` `module_disabled` once nothing else is left to send).
     ProgressFlushResult flush();
     void resetBackoff();
     std::vector<ProgressRefusal> refusals() const;
+    /// Forgets everything kept for `owner` (the account is gone).
+    void drop(const std::string& owner);
 
 private:
     std::string key(const std::string& owner) const;

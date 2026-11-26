@@ -260,7 +260,10 @@ public:
     /// Saves a new version of a SAVE or PROFILE slot over `baseVersion` (the version the game read, nothing for
     /// an empty slot). Throws `file_conflict` (`details()["current"]`) when another device saved first.
     FileVersion saveFile(const std::string& slot, const std::string& data, const std::optional<std::string>& baseVersion);
-    /// Saves a SETTINGS slot (the latest wins), or DEVICE_SETTINGS with this device's id and description.
+    /// Saves a SETTINGS slot (the latest wins), or DEVICE_SETTINGS with this device's id and description. A slot is
+    /// written at most once every 30 seconds: a save that comes sooner is kept on the device and the newest content
+    /// goes when its turn comes, at the latest when the app pauses or stops; the returned version then has `queued` set.
+    /// A refused write (429 `too_many_writes`) is tried again after the server's Retry-After.
     FileVersion saveSettings(const std::string& slot, const std::string& data, const std::optional<SaveDevice>& device = std::nullopt);
     std::vector<WaitingSave> waitingSaves(const std::string& owner);
     FileVersion adoptWaitingSave(const std::string& uploadId, const std::optional<std::string>& baseVersion);
@@ -289,6 +292,8 @@ public:
     void sessionRound();
     /// Sends again the saves a refusal left waiting (same upload id, same bytes); what became of each.
     std::vector<ResumedUpload> resumeFiles();
+    /// How far the server's clock is ahead of this device's, as the SDK last learned it; nothing before the first answer.
+    std::optional<std::int64_t> serverOffsetMs() const;
     /// The app went to the background or came back.
     void setForeground(bool foreground);
     /// The network came back: the queues try at once (in the background).

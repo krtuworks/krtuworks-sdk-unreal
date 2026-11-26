@@ -59,15 +59,27 @@ bool bugsFinite(double value)
     return std::isfinite(value);
 }
 
-/// Statuses where the report can never be taken as it is: dropped rather than sent forever.
+/// Statuses where the report can never be taken as it is: dropped rather than sent forever. An error that came
+/// before the call (a refused refresh) or a refusal that can lift is never a verdict on the report.
 bool bugsReportRefused(const Error& e)
 {
+    if (e.waitsForLater()) return false;
     return e.status() == 400 || e.status() == 413 || e.code() == "report_id_reused";
 }
 
-/// The screenshot can never be taken (too late, too big, not a picture, the report gone); `screenshot_exists` is done.
+/// How long a report waits after `e`: the server's Retry-After; a failure only a change elsewhere lifts waits long.
+std::int64_t bugsWaitMs(const Error& e)
+{
+    if (e.retryAfter()) return static_cast<std::int64_t>(*e.retryAfter() * 1000);
+    if (Error::isWaitingCode(e.code()) || (e.authLayer() && !e.retryable())) return queueLongWaitMs;
+    return bugsRetryMs;
+}
+
+/// The screenshot can never be taken (too late, too big, not a picture, the report gone); `screenshot_exists` is
+/// done. A 409 that is only a pause (`app_transferring`, `account_merging`) and anything that can lift keeps it.
 bool bugsScreenshotRefused(const Error& e)
 {
+    if (e.waitsForLater() || e.code() == "app_transferring") return false;
     const int s = e.status();
     return s == 400 || s == 404 || s == 409 || s == 411 || s == 413 || s == 415;
 }
@@ -264,12 +276,41 @@ void BugReports::move(const std::string& from, const std::string& to)
     }
 }
 
+bool BugReports::afterFailure(const Error& e, const std::string& key, const Json& w, std::int64_t now, BugFlushResult& result)
+{
+    const auto reportId = *w.getString("reportId");
+    if (!w.getString("bugId") && bugsReportRefused(e))
+    {
+        store_.remove(key);
+        result.dropped.push_back(BugDropped{reportId, e.code(), false});
+        return true;
+    }
+    // Anything else (no answer, a busy or closed server, a player in a merge, a ban, the module off for now) keeps
+    // the report for later.
+    if (e.code() != "context_changed")
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        waitUntil_[reportId] = now + bugsWaitMs(e);
+    }
+    result.stoppedBy = e.code();
+    return false;
+}
+
 BugFlushResult BugReports::flush()
 {
     BugFlushResult result;
     const auto player = subject_();
     if (!player) return result;
     const auto now = nowMs();
+    {
+        // Waits that ran out say nothing more: the map holds only reports still waiting.
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto it = waitUntil_.begin(); it != waitUntil_.end();)
+        {
+            if (it->second <= now) it = waitUntil_.erase(it);
+            else ++it;
+        }
+    }
     std::vector<std::pair<std::string, Json>> queue;
     for (const auto& key : store_.keys(prefix(*player)))
     {
@@ -287,6 +328,21 @@ BugFlushResult BugReports::flush()
         }
         try
         {
+            std::optional<std::string> shot;
+            if (w.contains("screenshot"))
+            {
+                try
+                {
+                    shot = fromBase64(w["screenshot"].getString("bytes").value_or(""));
+                }
+                catch (const std::invalid_argument&)
+                {
+                    // A picture that cannot be read can never be sent: the report goes without it.
+                    w.erase("screenshot");
+                    putJson(store_, key, w);
+                    result.dropped.push_back(BugDropped{reportId, "screenshot_unreadable", true});
+                }
+            }
             if (!w.getString("bugId"))
             {
                 PlayerCall post;
@@ -299,14 +355,13 @@ BugFlushResult BugReports::flush()
                 w["bugId"] = *bugId;
                 if (w.contains("screenshot")) putJson(store_, key, w);
             }
-            if (w.contains("screenshot"))
+            if (shot)
             {
-                const auto& shot = w["screenshot"];
                 PlayerCall put;
                 put.method = "PUT";
                 put.owner = *player;
-                put.body = fromBase64(shot.getString("bytes").value_or(""));
-                put.headers.set("content-type", shot.getString("type").value_or("image/png"));
+                put.body = *shot;
+                put.headers.set("content-type", w["screenshot"].getString("type").value_or("image/png"));
                 try
                 {
                     api_.player("/v1/me/bug-reports/" + *w.getString("bugId") + "/screenshot", put);
@@ -327,22 +382,12 @@ BugFlushResult BugReports::flush()
         }
         catch (const Error& e)
         {
-            if (!w.getString("bugId") && bugsReportRefused(e))
-            {
-                store_.remove(key);
-                result.dropped.push_back(BugDropped{reportId, e.code(), false});
-                continue;
-            }
-            // Anything else (no answer, a busy or closed server, a player in a merge, a ban, the module off for
-            // now) keeps the report for later.
-            if (e.code() != "context_changed")
-            {
-                const auto wait = e.retryAfter() ? static_cast<std::int64_t>(*e.retryAfter() * 1000) : bugsRetryMs;
-                std::lock_guard<std::mutex> lock(mutex_);
-                waitUntil_[reportId] = now + wait;
-            }
-            result.stoppedBy = e.code();
-            return result;
+            if (!afterFailure(e, key, w, now, result)) return result;
+        }
+        catch (const std::exception& other)
+        {
+            // Not the SDK's own failure: read as no answer, the report stays.
+            if (!afterFailure(Error("network_error", other.what()), key, w, now, result)) return result;
         }
     }
     return result;
@@ -387,6 +432,18 @@ void BugReports::tellFixed(const std::string& who, const std::vector<BugReportVi
     for (const auto& id : result.told)
         if (untold.count(id) == 0) ids.push(id);
     putJson(store_, fixedKey(who), Json::object({{"told", ids}}));
+}
+
+void BugReports::drop(const std::string& owner)
+{
+    for (const auto& key : store_.keys(prefix(owner))) store_.remove(key);
+    store_.remove(fixedKey(owner));
+    std::lock_guard<std::mutex> lock(mutex_);
+    events_.erase(std::remove_if(events_.begin(), events_.end(), [&owner](const NotedEvent& e) { return e.owner == owner; }), events_.end());
+    logLines_.erase(std::remove_if(logLines_.begin(), logLines_.end(), [&owner](const NotedLine& l) { return l.owner == owner; }), logLines_.end());
+    logBytes_ = 0;
+    for (const auto& l : logLines_) logBytes_ += l.line.size() + 1;
+    if (lastFps_ && lastFps_->owner == owner) lastFps_.reset();
 }
 
 void BugReports::resetBackoff()

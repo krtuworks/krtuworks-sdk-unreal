@@ -160,6 +160,10 @@ struct KRTUWORKS_API FKrtuworksGate
 
 	UPROPERTY(BlueprintReadOnly, Category = "Krtuworks")
 	FString SwitchMessage;
+
+	/** The game needs the server on its very first launch (krtuworks-config.json firstLaunch: online) and it cannot be reached: show "connect to play" and try again. */
+	UPROPERTY(BlueprintReadOnly, Category = "Krtuworks")
+	bool bFirstLaunchOffline = false;
 };
 
 USTRUCT(BlueprintType)
@@ -397,6 +401,10 @@ struct KRTUWORKS_API FKrtuworksFileVersion
 	/** The platform whose cloud this copy came from (STEAM); empty for the server's own versions. */
 	UPROPERTY(BlueprintReadOnly, Category = "Krtuworks")
 	FString PlatformCloud;
+
+	/** A settings save that waits for its turn (a slot is written at most every 30 seconds): kept on the device and sent later; Id is empty until then. */
+	UPROPERTY(BlueprintReadOnly, Category = "Krtuworks")
+	bool bQueued = false;
 };
 
 /**

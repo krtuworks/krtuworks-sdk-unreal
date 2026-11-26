@@ -89,7 +89,7 @@ void CloudMirror::sync(const std::string& owner, const std::string& account, con
 void CloudMirror::syncOnce(const std::string& owner, const std::string& account, const std::string& sessionId, const std::optional<std::string>& only, std::vector<PlatformSaveConflict>& raised)
 {
     if (!cloud_.enabled()) return;
-    const auto list = files_.list();
+    const auto list = files_.list(owner);
     const auto key = agreedKey(owner, account);
     auto agreed = loadAgreed(key);
     for (const auto& slot : list.slots)
@@ -98,13 +98,13 @@ void CloudMirror::syncOnce(const std::string& owner, const std::string& account,
         if (!slot.platformMirror || slot.retired || !cloudMirrored(slot.kind) || leftAlone_.count(slot.key) != 0) continue;
         try
         {
-            syncSlot(slot, agreed, sessionId, raised);
+            syncSlot(owner, slot, agreed, sessionId, raised);
         }
         catch (const Error& err)
         {
             // The slot moved meanwhile, a write still settling, the server away: the next sync compares again.
             // Refused for good (too big, over the player's quota, the link): left alone for the session.
-            if (!err.retryable() && err.code() != "file_conflict" && err.code() != "upload_pending" && err.code() != "save_replaced")
+            if (!err.waitsForLater() && err.code() != "file_conflict" && err.code() != "upload_pending" && err.code() != "save_replaced")
             {
                 leftAlone_.insert(slot.key);
                 problem_("platform_" + err.code(), slot.key);
@@ -114,7 +114,7 @@ void CloudMirror::syncOnce(const std::string& owner, const std::string& account,
     }
 }
 
-void CloudMirror::syncSlot(const SlotView& slot, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised)
+void CloudMirror::syncSlot(const std::string& owner, const SlotView& slot, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised)
 {
     const auto onPlatform = cloud_.readFile(fileName(slot.key));
     const auto s = onPlatform ? std::optional<std::string>(toHex(sha256(onPlatform->data))) : std::nullopt;
@@ -135,25 +135,25 @@ void CloudMirror::syncSlot(const SlotView& slot, Agreed& agreed, const std::stri
             else agreed[slot.key] = *h;
             return;
         case MirrorStep::ToPlatform:
-            toPlatform(slot.key, *h, onPlatform, agreed);
+            toPlatform(owner, slot.key, *h, onPlatform, agreed);
             return;
         case MirrorStep::ToServer:
         {
             // A SAVE or PROFILE over the version compared (or into the empty slot); SETTINGS: the latest wins.
             const bool conditional = slot.kind != "SETTINGS";
-            const auto saved = files_.save(slot.key, onPlatform->data, conditional, conditional && slot.file ? std::optional<std::string>(slot.file->id) : std::nullopt, std::nullopt);
+            const auto saved = files_.save(slot.key, onPlatform->data, conditional, conditional && slot.file ? std::optional<std::string>(slot.file->id) : std::nullopt, std::nullopt, owner);
             agreed[slot.key] = saved.sha256;
             return;
         }
         case MirrorStep::Offer:
-            offer(slot, *onPlatform, *s, agreed, sessionId, raised);
+            offer(owner, slot, *onPlatform, *s, agreed, sessionId, raised);
             return;
     }
 }
 
-void CloudMirror::toPlatform(const std::string& slot, const std::string& h, const std::optional<PlatformCloudFile>& onPlatform, Agreed& agreed)
+void CloudMirror::toPlatform(const std::string& owner, const std::string& slot, const std::string& h, const std::optional<PlatformCloudFile>& onPlatform, Agreed& agreed)
 {
-    const auto read = files_.read(slot, std::nullopt, std::nullopt);
+    const auto read = files_.read(slot, std::nullopt, std::nullopt, owner);
     // The slot moved since the list was read: the next sync compares the new version.
     if (!read || read->sha256 != h) return;
     const auto free = cloud_.availableBytes();
@@ -173,12 +173,12 @@ void CloudMirror::toPlatform(const std::string& slot, const std::string& h, cons
     agreed[slot] = h;
 }
 
-void CloudMirror::offer(const SlotView& slot, const PlatformCloudFile& onPlatform, const std::string& s, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised)
+void CloudMirror::offer(const std::string& owner, const SlotView& slot, const PlatformCloudFile& onPlatform, const std::string& s, Agreed& agreed, const std::string& sessionId, std::vector<PlatformSaveConflict>& raised)
 {
     FileVersion offered;
     try
     {
-        offered = files_.offer(slot.key, onPlatform.data, slot.file->id, sessionId);
+        offered = files_.offer(slot.key, onPlatform.data, slot.file->id, sessionId, owner);
     }
     catch (const Error& err)
     {

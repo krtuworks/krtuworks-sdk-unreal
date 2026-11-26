@@ -10,6 +10,8 @@ namespace krtu
 namespace
 {
 constexpr const char* ticketIdentity = "krtuworks-id";
+/// How many of the newest tickets are remembered for cancelling.
+constexpr std::size_t maxIssuedTickets = 16;
 }
 
 SteamAchievementSync::SteamAchievementSync(std::unique_ptr<SteamBackend> steam, std::chrono::milliseconds ticketWait)
@@ -35,12 +37,27 @@ std::optional<std::string> SteamAchievementSync::webApiTicket()
     waiting_.erase(handle);
     if (ticket && !ticket->empty())
     {
+        issued_.emplace_back(*ticket, handle);
+        if (issued_.size() > maxIssuedTickets) issued_.pop_front();
         return ticket;
     }
     // A ticket that came too late, was refused or came back empty is never sent: cancel it so it is not left valid.
     lock.unlock();
     steam_->cancelAuthTicket(handle);
     return std::nullopt;
+}
+
+void SteamAchievementSync::cancelWebApiTicket(const std::string& ticket)
+{
+    std::uint32_t handle = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = std::find_if(issued_.begin(), issued_.end(), [&ticket](const auto& entry) { return entry.first == ticket; });
+        if (found == issued_.end()) return;
+        handle = found->second;
+        issued_.erase(found);
+    }
+    steam_->cancelAuthTicket(handle);
 }
 
 void SteamAchievementSync::onTicketAnswer(std::uint32_t handle, const std::uint8_t* ticket, int length)

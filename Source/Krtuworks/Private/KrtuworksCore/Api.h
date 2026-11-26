@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -27,6 +29,13 @@ struct PlayerCall
     /// starts. The call goes only with that player's token; with any other it is not sent.
     std::optional<std::string> owner;
 };
+
+/// How long a queue waits after `err` before its next send: the server's Retry-After; else a failure that only a
+/// change elsewhere lifts (a waiting code, a refused refresh) waits long; else it doubles from 5 seconds up to 5
+/// minutes (`backoffMs` holds the doubling and is updated).
+std::int64_t queueWaitMs(const Error& err, std::atomic<std::int64_t>& backoffMs);
+/// The long wait after a failure only a change elsewhere lifts (a frozen app, a ban, a merge in progress).
+constexpr std::int64_t queueLongWaitMs = 15LL * 60LL * 1000LL;
 
 /// The player's calls to the server (`/v1`, Bearer + X-Krtu-Build). Same rules as krtuworks-sdk-js/src/api.ts.
 class Api

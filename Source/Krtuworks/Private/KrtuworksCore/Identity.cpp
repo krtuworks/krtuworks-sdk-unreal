@@ -401,7 +401,16 @@ StoredTokens Identity::refresh(const std::string& usedAccess)
     const auto stored = loadTokens();
     if (!stored)
     {
+        // Another instance on the same store signed the player out meanwhile: this one hears it too.
+        const auto had = player();
         adopt(std::nullopt);
+        if (had)
+        {
+            IdentityChange change;
+            change.type = "signed_out";
+            change.reason = "signed_out";
+            emit(change);
+        }
         throw identitySignedOut();
     }
     if (stored->accessToken != usedAccess && stored->accessExpiresAt - identityRefreshEarlyMs > clock_.serverNowMs())
@@ -449,6 +458,7 @@ StoredTokens Identity::refused(const StoredTokens& stored, const Error& err)
     if (err.code() != "invalid_grant") throw err;
     const auto why = identityWhy(err);
     if (contains(why, "account_merged")) markMergedLocked(stored.subject, std::nullopt);
+    if (contains(why, "account_deleted")) markDeletedLocked(stored.subject);
     // A frozen app keeps its grants: the same refresh token works again once it is resumed.
     if (contains(why, "app_suspended")) throw err;
     adopt(std::nullopt);
@@ -488,6 +498,54 @@ void Identity::markMerged(const std::string& previousSubject, const std::optiona
     markMergedLocked(previousSubject, mergedInto);
 }
 
+void Identity::markDeletedLocked(const std::string& subject)
+{
+    const auto stored = loadTokens();
+    if (stored && stored->subject == subject)
+    {
+        adopt(std::nullopt);
+        IdentityChange change;
+        change.type = "signed_out";
+        change.reason = "account_deleted";
+        change.previousSubject = subject;
+        emit(change);
+    }
+    std::function<void(const std::string&)> handler;
+    {
+        std::lock_guard<std::mutex> lock(listenersMutex_);
+        handler = deletedHandler_;
+    }
+    if (handler) quietly([&handler, &subject] { handler(subject); });
+    throw Error("account_deleted", "This account was deleted.", 401);
+}
+
+void Identity::markDeleted(const std::string& subject)
+{
+    auto lock = NamedLocks::take(lockName());
+    markDeletedLocked(subject);
+}
+
+void Identity::setDeletedHandler(std::function<void(const std::string&)> handler)
+{
+    std::lock_guard<std::mutex> lock(listenersMutex_);
+    deletedHandler_ = std::move(handler);
+}
+
+void Identity::noteMerging(const std::string& subject)
+{
+    const auto current = player();
+    if (!current || current->subject != subject || merging_.exchange(true)) return;
+    emit(IdentityChange{"merging", current, false, false, std::nullopt, std::nullopt, std::nullopt});
+}
+
+void Identity::noteMergeEnded(const std::string& subject)
+{
+    if (!merging_.load()) return;
+    const auto current = player();
+    if (!current || current->subject != subject || !merging_.exchange(false)) return;
+    emit(IdentityChange{"merging_ended", current, false, false, std::nullopt, std::nullopt, std::nullopt});
+}
+
 // ── Guests (device key, Steam ticket) ───────────────────────────────────
 
 std::string Identity::challenge(const std::string& purpose)
@@ -520,16 +578,32 @@ std::pair<StoredTokens, bool> Identity::guestGrant(const std::optional<GuestRequ
         deviceKey = DeviceKey::create();
         saveDeviceKey(*deviceKey);
     }
-    if (!deviceKey->known && !request) throw Error("birth_date_required", "A new guest needs the age screen: pass the birth date and the accepted terms.", 400);
-    const auto assertion = proofWith(*deviceKey, "login");
+    // A Steam ticket finds the guest of that Steam account on a new device and adds this device's key to it, so the
+    // grant is tried first and the server asks for the birth date only when the Steam account is new.
+    if (!deviceKey->known && !request && !steamTicket)
+    {
+        throw Error("birth_date_required", "A new guest needs the age screen: pass the birth date and the accepted terms.", 400);
+    }
+    std::string assertion;
+    try
+    {
+        assertion = proofWith(*deviceKey, "login");
+    }
+    catch (...)
+    {
+        // The ticket was never sent: it must not stay valid.
+        discardTicket(steamTicket);
+        throw;
+    }
+    const bool introducing = !deviceKey->known && request.has_value();
     FormFields fields{
         {"grant_type", std::string(steamTicket ? Identity::steamTicketGrant : Identity::deviceKeyGrant)},
         {"assertion", assertion},
         {"scope", std::string(Resolved::guestScope)},
         {"resource", std::string(Resolved::devResource)},
         {"ticket", steamTicket},
-        {"birth_date", deviceKey->known ? std::nullopt : std::optional<std::string>(request->birthDate)},
-        {"accepted_terms", deviceKey->known ? std::nullopt : std::optional<std::string>(request->acceptedTerms)},
+        {"birth_date", introducing ? std::optional<std::string>(request->birthDate) : std::nullopt},
+        {"accepted_terms", introducing ? std::optional<std::string>(request->acceptedTerms) : std::nullopt},
     };
     const auto answer = token(fields);
     if (answer.status != 200)
@@ -542,15 +616,20 @@ std::pair<StoredTokens, bool> Identity::guestGrant(const std::optional<GuestRequ
     const auto idToken = answer.body().getString("id_token");
     const auto id = idToken ? std::optional<Json>(jwtClaims(*idToken)) : std::nullopt;
     const std::string kind = steamTicket && id && id->getString("preferred_username") ? "account" : "guest";
-    const bool created = !deviceKey->known;
+    const bool wasKnown = deviceKey->known;
     auto signedIn = tokensFrom(answer, kind, std::nullopt);
-    if (created || (kind == "guest" && deviceKey->subject != signedIn.subject))
+    if (!wasKnown || (kind == "guest" && deviceKey->subject != signedIn.subject))
     {
         deviceKey->known = true;
         if (kind == "guest") deviceKey->subject = signedIn.subject;
         saveDeviceKey(*deviceKey);
     }
-    return {signedIn, created};
+    return {signedIn, introducing};
+}
+
+void Identity::discardTicket(const std::optional<std::string>& ticket)
+{
+    if (ticket && platform_ != nullptr) quietly([this, &ticket] { platform_->cancelWebApiTicket(*ticket); });
 }
 
 std::optional<std::string> Identity::termsIn(const std::string& text)
@@ -590,6 +669,7 @@ StoredTokens Identity::guestAgain(const StoredTokens& stored)
         if (e.code() != "invalid_grant" && e.code() != "birth_date_required") throw;
         const auto why = identityWhy(e);
         if (contains(why, "account_merged")) markMergedLocked(stored.subject, std::nullopt);
+        if (contains(why, "account_deleted")) markDeletedLocked(stored.subject);
         adopt(std::nullopt);
         if (contains(why, "account_deletion_pending"))
         {
@@ -608,13 +688,8 @@ StoredTokens Identity::guestAgain(const StoredTokens& stored)
 
 Player Identity::signInAsGuest(const std::optional<std::string>& birthDate, const std::optional<std::string>& acceptedTerms, bool viaSteam)
 {
-    auto before = meta();
-    const auto epoch = before.epoch;
-    if (birthDate)
-    {
-        before.guestRequest = GuestRequest{*birthDate, acceptedTerms ? *acceptedTerms : std::string(currentTerms)};
-        saveMeta(before);
-    }
+    // Read before waiting for the lock: a sign-in that starts meanwhile wins over this guest.
+    const auto epoch = meta().epoch;
     Player made;
     bool created = false;
     {
@@ -625,7 +700,19 @@ Player Identity::signInAsGuest(const std::optional<std::string>& birthDate, cons
             adopt(current);
             return playerOf(*current);
         }
-        const auto request = meta().guestRequest;
+        auto stored = meta();
+        if (stored.epoch != epoch) throw Error("context_changed", "A sign-in started while the guest was being made; the guest was not used.");
+        if (birthDate)
+        {
+            stored.guestRequest = GuestRequest{*birthDate, acceptedTerms ? *acceptedTerms : std::string(currentTerms)};
+            saveMeta(stored);
+        }
+        else if (acceptedTerms && stored.guestRequest && stored.guestRequest->acceptedTerms != *acceptedTerms)
+        {
+            stored.guestRequest->acceptedTerms = *acceptedTerms;
+            saveMeta(stored);
+        }
+        const auto request = stored.guestRequest;
         std::optional<std::string> ticket;
         if (viaSteam)
         {
@@ -635,13 +722,28 @@ Player Identity::signInAsGuest(const std::optional<std::string>& birthDate, cons
         std::pair<StoredTokens, bool> result;
         try
         {
-            result = guestGrant(request, ticket);
+            try
+            {
+                result = guestGrant(request, ticket);
+            }
+            catch (const Error& e)
+            {
+                if (!ticket || e.code() != "steam_not_configured") throw;
+                result = guestGrant(request, std::nullopt);
+            }
         }
         catch (const Error& e)
         {
-            if (!ticket || e.code() != "steam_not_configured") throw;
-            result = guestGrant(request, std::nullopt);
+            // The server refused the stored answers for good: they are not tried again at every launch.
+            if (e.code() == "too_young" || e.code() == "invalid_birth_date")
+            {
+                auto refused = meta();
+                refused.guestRequest.reset();
+                saveMeta(refused);
+            }
+            throw;
         }
+        // Another process on the same store may have started a sign-in meanwhile (the lock is this process's): it wins.
         auto now = meta();
         if (now.epoch != epoch) throw Error("context_changed", "A sign-in started while the guest was being made; the guest was not used.");
         now.guestRequest.reset();
@@ -697,6 +799,13 @@ std::string Identity::beginSignIn(const std::string& redirectUri, bool carryGues
                 // Offline or refused: the sign-in goes on without the guest.
             }
         }
+    }
+    for (const auto& name : secrets_.keys(key("signin:")))
+    {
+        // A sign-in the player never came back to is of no use after its time.
+        const auto json = getJson(secrets_, name);
+        const auto old = json ? PendingSignIn::fromJson(*json) : std::nullopt;
+        if (!old || nowMs() - old->startedAt > identityPendingTtlMs) secrets_.remove(name);
     }
     putJson(secrets_, key("signin:" + state), PendingSignIn{verifier, nonce, redirectUri, epoch, nowMs()}.toJson());
     std::string url = opts_.idOrigin + "/oidc/auth?";

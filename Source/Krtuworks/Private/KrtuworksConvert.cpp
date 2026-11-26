@@ -118,6 +118,7 @@ namespace KrtuworksConvert
 		Out.MaintenanceMessage = ToFString(Gate.maintenanceMessage.value_or(""));
 		Out.bUpdateRequired = Gate.updateRequired;
 		Out.bSwitchedOff = Gate.switchedOff.has_value();
+		Out.bFirstLaunchOffline = Gate.firstLaunchOffline;
 		if (Gate.switchedOff)
 		{
 			Out.SwitchMode = ToFString(Gate.switchedOff->mode);
@@ -237,6 +238,7 @@ namespace KrtuworksConvert
 		Out.SavedAt = ToFString(Version.savedAt);
 		Out.bFromMerge = Version.fromMerge;
 		Out.PlatformCloud = ToFString(Version.platformCloud.value_or(""));
+		Out.bQueued = Version.queued;
 		return Out;
 	}
 

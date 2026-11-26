@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.RegularExpressions;
 using UnrealBuildTool;
 
 // The Krtuworks SDK for Unreal (5.3+): the engine-independent core (Public/KrtuworksCore, Private/KrtuworksCore:
@@ -48,11 +49,35 @@ public class Krtuworks : ModuleRules
 			if (File.Exists(config))
 			{
 				RuntimeDependencies.Add(config, StagedFileType.UFS);
+				if (Target.Platform == UnrealTargetPlatform.Android)
+				{
+					RequireAndroidSlug(Target.ProjectFile.Directory.FullName, config);
+				}
 			}
 			else if (Target.Type != TargetType.Editor)
 			{
 				throw new BuildException("Krtuworks SDK: put the app's krtuworks-config.json (from the Credentials page) next to the .uproject file.");
 			}
+		}
+	}
+
+	// The phone sign-in comes back on com.krtuworks.<slug>, added to the manifest from the AppSlug setting of
+	// DefaultGame.ini. The editor copies the slug there when it opens the project; a build from a clean checkout
+	// (CI, the command line) has not, and would ship an app the sign-in can never return to, so it stops here.
+	private static void RequireAndroidSlug(string projectDirectory, string configFile)
+	{
+		Match inConfig = Regex.Match(File.ReadAllText(configFile), "\"slug\"\\s*:\\s*\"([^\"]+)\"");
+		if (!inConfig.Success)
+		{
+			return;
+		}
+		string slug = inConfig.Groups[1].Value;
+		string ini = Path.Combine(projectDirectory, "Config", "DefaultGame.ini");
+		string text = File.Exists(ini) ? File.ReadAllText(ini) : "";
+		Match inSettings = Regex.Match(text, "\\[/Script/Krtuworks\\.KrtuworksSettings\\][^\\[]*?^AppSlug=(\\S*)", RegexOptions.Multiline);
+		if (!inSettings.Success || inSettings.Groups[1].Value != slug)
+		{
+			throw new BuildException("Krtuworks SDK: the Android sign-in return needs AppSlug=" + slug + " under [/Script/Krtuworks.KrtuworksSettings] in Config/DefaultGame.ini (open the project in the editor once, or add it by hand).");
 		}
 	}
 }

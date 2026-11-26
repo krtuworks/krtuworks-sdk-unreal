@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -18,7 +19,8 @@ namespace krtu::detail
 class SessionKeeper
 {
 public:
-    SessionKeeper(const Resolved& opts, Api& api, std::function<std::optional<std::string>()> subject, std::function<std::optional<std::string>()> platformTicket);
+    SessionKeeper(const Resolved& opts, Api& api, std::function<std::optional<std::string>()> subject, std::function<std::optional<std::string>()> platformTicket,
+                  std::function<void(const std::string&)> cancelTicket = nullptr);
 
     /// The session of the player who plays now, if one is open.
     std::optional<SessionInfo> session() const;
@@ -31,6 +33,11 @@ public:
     void setForeground(bool foreground);
     /// Opens the player's session if there is none (one at a time).
     std::optional<SessionInfo> open();
+    /// Opens the session again when the last open failed (offline, a busy server, a refusal that can lift) and its
+    /// wait is over; never throws. The client's tick calls it.
+    void retryOpen();
+    /// The network is back or the player changed: the next retryOpen tries at once.
+    void resetOpenBackoff();
     /// The server's `platformLink` (the session open's, the consent answer's); empty when it is not one.
     static std::optional<PlatformLink> linkOf(const Json& value);
     /// Keeps the player's answer to a waiting platform account on the open session `id`.
@@ -51,6 +58,7 @@ public:
 private:
     /// The server's `platformLink` (the session open's, the consent answer's); empty when it is not one.
     std::optional<SessionInfo> doOpen();
+    std::optional<SessionInfo> openOnce();
     std::int64_t elapsedMs() const;
     /// Under `mutex_`.
     std::int64_t launchActiveMsLocked() const;
@@ -60,6 +68,8 @@ private:
     std::function<std::optional<std::string>()> subject_;
     /// A Steam ticket for the session's ownership check, when the platform gives one.
     std::function<std::optional<std::string>()> platformTicket_;
+    /// Cancels a ticket that was asked for and never sent.
+    std::function<void(const std::string&)> cancelTicket_;
     std::chrono::steady_clock::time_point started_;
     mutable std::mutex mutex_;
     std::optional<SessionInfo> current_;
@@ -71,6 +81,10 @@ private:
     /// The launch's time in use when the current session began: the server counts only what follows.
     std::int64_t sessionBaseMs_ = 0;
     std::mutex openMutex_;
+    /// The last open failed: retryOpen tries again when `openNotBeforeMs_` (on this keeper's clock) has passed.
+    bool openFailed_ = false;
+    std::int64_t openNotBeforeMs_ = 0;
+    std::atomic<std::int64_t> openBackoffMs_{0};
     std::function<void(const Json&)> onEntitlements_;
 };
 }  // namespace krtu::detail

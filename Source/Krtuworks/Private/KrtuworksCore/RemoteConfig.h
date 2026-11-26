@@ -21,6 +21,8 @@ public:
     RemoteConfig(const Resolved& opts, Api& api, KeyValueStore& store);
 
     void load();
+    /// Whether a config from the server is kept on this device (an earlier launch's, or this one's).
+    bool hasCopy() const;
     /// Asks the server; false when nothing changed. Throws when it cannot (the kept copy stays).
     bool refresh();
     /// A module the owner switched off makes nothing; a switch never set is on. In an app (not a game) the
@@ -41,6 +43,7 @@ private:
     Api& api_;
     KeyValueStore& store_;
     mutable std::mutex mutex_;
+    bool copy_ = false;
     std::optional<std::string> etag_;
     Json value_;
 };
