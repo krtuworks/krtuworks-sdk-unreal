@@ -130,6 +130,7 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
     const auto owner = subject_();
     if (!owner) return std::nullopt;
     std::string clientSessionId;
+    std::uint64_t openedIn = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (current_ && current_->owner != *owner)
@@ -138,6 +139,7 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
             clientSessionId_.reset();
             nextHeartbeatAt_ = sessionsNever;
         }
+        openedIn = generation_;
         if (!clientSessionId_)
         {
             // A new session (not an open sent again after a lost answer): its time in use starts now.
@@ -170,6 +172,27 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
     const auto& session = answer.body()["session"];
     if (!session.isObject() || subject_() != owner) return std::nullopt;
     std::optional<SessionInfo> opened;
+    bool late = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        late = generation_ != openedIn;
+    }
+    if (late)
+    {
+        // Closed while the open was on its way (the SDK shut down, the player left): the server's session ends now.
+        const auto lateId = session.getString("id").value_or("");
+        if (!lateId.empty())
+        {
+            quietly([this, &lateId, &owner] {
+                PlayerCall end;
+                end.method = "POST";
+                end.json = Json::object({{"activeSeconds", 0}});
+                end.owner = *owner;
+                api_.player("/v1/sessions/" + lateId + "/end", end);
+            });
+        }
+        return std::nullopt;
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         current_ = SessionInfo{session.getString("id").value_or(""), *owner, session.getString("startedAt").value_or(""), linkOf(answer.body()["platformLink"])};
@@ -224,9 +247,11 @@ void SessionKeeper::heartbeat()
 {
     const auto current = session();
     if (!current) return;
+    std::uint64_t beatIn = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         nextHeartbeatAt_ = elapsedMs() + static_cast<std::int64_t>(heartbeatSeconds_) * 1000;
+        beatIn = generation_;
     }
     try
     {
@@ -246,9 +271,10 @@ void SessionKeeper::heartbeat()
     catch (const Error& err)
     {
         if (err.code() != "session_ended" && err.code() != "session_not_found") return;
-        // The server closed it (30 minutes without a heartbeat): a new one, with a new id.
+        // The server closed it (30 minutes without a heartbeat): a new one, with a new id; not after a close.
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            if (generation_ != beatIn) return;
             current_.reset();
             clientSessionId_.reset();
         }
@@ -320,6 +346,7 @@ void SessionKeeper::end()
 void SessionKeeper::close()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    ++generation_;
     current_.reset();
     clientSessionId_.reset();
     nextHeartbeatAt_ = sessionsNever;

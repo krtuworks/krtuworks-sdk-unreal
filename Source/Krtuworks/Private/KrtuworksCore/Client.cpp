@@ -171,6 +171,8 @@ struct Client::Impl
 
     void onIdentityChanged(const IdentityChange& change)
     {
+        // A stopped SDK opens nothing again (a late sign-in answer included).
+        if (stopping.load()) return;
         // A merge in progress changes nobody: the game is only told.
         if (change.type == "merging" || change.type == "merging_ended")
         {
@@ -186,7 +188,7 @@ struct Client::Impl
         {
             sessions.close();
             presence.onIdentity(std::nullopt, true);
-            licences.forget();
+            forgetPlayer();
             std::lock_guard<std::mutex> lock(stateMutex);
             sessionOwner.reset();
         }
@@ -199,7 +201,7 @@ struct Client::Impl
                 if (sessionOwner != subjectNow)
                 {
                     sessions.close();
-                    licences.forget();
+                    forgetPlayer();
                 }
                 sessionOwner = subjectNow;
             }
@@ -217,6 +219,17 @@ struct Client::Impl
         if (handler) quietly([&handler, &change] { handler(change); });
     }
 
+    /// What the last player's answers left in memory: the next player starts from the app's own values.
+    void forgetPlayer()
+    {
+        licences.forget();
+        {
+            std::lock_guard<std::mutex> lock(experimentsMutex);
+            experiments.clear();
+        }
+        optedOut.store(false);
+    }
+
     Player signInAsGuest(const std::optional<std::string>& birthDate, const std::optional<std::string>& acceptedTerms)
     {
         return identity.signInAsGuest(birthDate, acceptedTerms, steamOn());
@@ -228,6 +241,7 @@ struct Client::Impl
     /// on an earlier launch is tried again.
     void settle()
     {
+        if (stopping.load()) return;
         const auto current = identity.player();
         if (!current)
         {
@@ -242,6 +256,7 @@ struct Client::Impl
         quietly([this, &current] { settleMerges(current->subject); });
         quietly([this] { readOptOut(); });
         quietly([this] { licences.ensureLoaded(); });
+        if (stopping.load()) return;
         if (options.sessions && config.moduleOn("sessions")) quietly([this] { sessions.open(); });
         if (options.game() && options.platform == "STEAM") quietly([this] { licences.refresh(); });
         quietly([this] { presence.refresh(); });
@@ -401,12 +416,15 @@ struct Client::Impl
 
     void readOptOut()
     {
-        const auto kept = store->get(optOutKey());
-        if (kept) optedOut.store(*kept == "true");
+        const auto key = optOutKey();
+        // A player with nothing kept on this device is on until the server says otherwise.
+        optedOut.store(store->get(key) == std::optional<std::string>("true"));
         if (!identity.player()) return;
         const auto answer = api.player("/v1/me/telemetry-opt-out", PlayerCall());
+        // Another player came in while the answer was on its way: it is not theirs.
+        if (optOutKey() != key) return;
         optedOut.store(answer.body().getBool("optedOut") == std::optional<bool>(true));
-        store->set(optOutKey(), optedOut.load() ? "true" : "false");
+        store->set(key, optedOut.load() ? "true" : "false");
     }
 
     bool bugFixedTold(const BugReportView& report)
@@ -1231,12 +1249,15 @@ std::map<std::string, bool> Client::moduleStates() const
 
 std::vector<Experiment> Client::refreshExperiments()
 {
+    const auto asked = impl_->subject();
     const auto answer = impl_->api.player("/v1/me/experiments", PlayerCall());
     std::vector<Experiment> list;
     for (const auto& item : answer.body()["experiments"].items())
     {
         if (item.isObject()) list.push_back(Experiment::fromJson(item));
     }
+    // Another player came in while the answer was on its way: their groups are not these.
+    if (impl_->subject() != asked) return list;
     std::lock_guard<std::mutex> lock(impl_->experimentsMutex);
     impl_->experiments.clear();
     for (const auto& experiment : list) impl_->experiments[experiment.configKey] = experiment.value;
@@ -1245,6 +1266,8 @@ std::vector<Experiment> Client::refreshExperiments()
 
 Json Client::value(const std::string& key) const
 {
+    // A/B values count only while the A/B module is on.
+    if (impl_->config.moduleOn("abTests"))
     {
         std::lock_guard<std::mutex> lock(impl_->experimentsMutex);
         const auto found = impl_->experiments.find(key);

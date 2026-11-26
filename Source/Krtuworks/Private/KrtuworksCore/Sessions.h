@@ -86,5 +86,7 @@ private:
     std::int64_t openNotBeforeMs_ = 0;
     std::atomic<std::int64_t> openBackoffMs_{0};
     std::function<void(const Json&)> onEntitlements_;
+    /// Moves on every close (under `mutex_`): an answer that arrives after it belongs to a session nobody wants any more.
+    std::uint64_t generation_ = 0;
 };
 }  // namespace krtu::detail
