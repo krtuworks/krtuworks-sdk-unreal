@@ -206,6 +206,23 @@ std::vector<std::pair<std::string, std::string>> queryOf(const std::string& url)
     return q;
 }
 
+namespace
+{
+std::optional<std::string> stateOf(const std::string& url)
+{
+    for (const auto& [key, value] : queryOf(url))
+        if (key == "state") return value;
+    return std::nullopt;
+}
+}  // namespace
+
+bool returnBelongsTo(const std::string& openedUrl, const std::string& returnedUrl)
+{
+    const auto opened = stateOf(openedUrl);
+    const auto returned = stateOf(returnedUrl);
+    return !opened || !returned || *opened == *returned;
+}
+
 // ── Identity ────────────────────────────────────────────────────────────
 
 Identity::Identity(const Resolved& opts, KeyValueStore& store, KeyValueStore& secrets, HttpTransport& http, Clock& clock, PlatformServices* platform)

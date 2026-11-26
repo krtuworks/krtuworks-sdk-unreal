@@ -7,6 +7,7 @@
 #include "Android/AndroidApplication.h"
 #include "Android/AndroidJNI.h"
 #include "KrtuworksCore/Crypto.h"
+#include "KrtuworksCore/Identity.h"
 #include "KrtuworksCore/Store.h"
 
 #include <chrono>
@@ -30,6 +31,8 @@ namespace
 		std::condition_variable Arrived;
 		std::uint64_t Generation = 0;
 		std::string Scheme;
+		/** The address the waiting sign-in opened: a return carrying another sign-in's state is not its. */
+		std::string OpenedUrl;
 		std::string Address;
 		bool bWaiting = false;
 		std::chrono::steady_clock::time_point ResumedAt{};
@@ -122,7 +125,7 @@ JNI_METHOD void Java_com_krtuworks_sdk_KrtuworksAndroid_nativeAddress(JNIEnv* En
 	FAndroidSignIn& State = SignIn();
 	{
 		std::lock_guard<std::mutex> Lock(State.Mutex);
-		if (!State.bWaiting || Text.compare(0, State.Scheme.size() + 1, State.Scheme + ":") != 0)
+		if (!State.bWaiting || Text.compare(0, State.Scheme.size() + 1, State.Scheme + ":") != 0 || !krtu::detail::returnBelongsTo(State.OpenedUrl, Text))
 		{
 			return;
 		}
@@ -167,6 +170,7 @@ namespace KrtuworksPlatform
 			std::lock_guard<std::mutex> Lock(State.Mutex);
 			Mine = ++State.Generation;
 			State.Scheme = Scheme;
+			State.OpenedUrl = Url;
 			State.Address.clear();
 			State.bWaiting = true;
 			State.bResumed = false;

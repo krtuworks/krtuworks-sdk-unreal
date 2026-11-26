@@ -95,6 +95,10 @@ Json jwtClaims(const std::string& token);
 /// The query of a return address, read from the text (a phone's return has the app's own scheme).
 std::vector<std::pair<std::string, std::string>> queryOf(const std::string& url);
 
+/// Whether a return address belongs to the sign-in opened at `openedUrl`: not when it carries another
+/// sign-in's `state` (a late return of an earlier sign-in on the same scheme).
+bool returnBelongsTo(const std::string& openedUrl, const std::string& returnedUrl);
+
 /// Who plays: the tokens, the device's guest key, and every way a player arrives or leaves. One token chain
 /// per sign-in client; every write of it under one lock, and a refresh writes its answer only over the
 /// refresh token it spent. Same rules as the JS SDK (krtuworks-sdk-js/src/identity.ts).

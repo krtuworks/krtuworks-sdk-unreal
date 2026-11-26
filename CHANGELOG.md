@@ -4,6 +4,11 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.10 - 2026-11-26
+
+### Fixed
+- Phone sign-in on Android: a late return from an earlier sign-in is no longer taken as the answer to the sign-in now waiting. Before, only the app's return scheme was checked, so the earlier sign-in's return could complete the new one with the wrong result.
+
 ## 1.0.9 - 2026-11-26
 
 ### Fixed
