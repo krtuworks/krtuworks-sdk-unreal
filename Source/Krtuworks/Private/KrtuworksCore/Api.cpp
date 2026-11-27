@@ -15,7 +15,7 @@ bool apiAccepted(const PlayerCall& call, int status)
 std::int64_t queueWaitMs(const Error& err, std::atomic<std::int64_t>& backoffMs)
 {
     if (err.retryAfter()) return static_cast<std::int64_t>(*err.retryAfter() * 1000);
-    if (Error::isWaitingCode(err.code()) || (err.authLayer() && !err.retryable())) return queueLongWaitMs;
+    if (err.waiting()) return queueLongWaitMs;
     const auto next = (std::min)(static_cast<std::int64_t>(300000), (std::max)(static_cast<std::int64_t>(5000), backoffMs.load() * 2));
     backoffMs.store(next);
     return next;

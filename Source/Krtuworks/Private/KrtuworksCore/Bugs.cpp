@@ -71,7 +71,7 @@ bool bugsReportRefused(const Error& e)
 std::int64_t bugsWaitMs(const Error& e)
 {
     if (e.retryAfter()) return static_cast<std::int64_t>(*e.retryAfter() * 1000);
-    if (Error::isWaitingCode(e.code()) || (e.authLayer() && !e.retryable())) return queueLongWaitMs;
+    if (e.waiting()) return queueLongWaitMs;
     return bugsRetryMs;
 }
 

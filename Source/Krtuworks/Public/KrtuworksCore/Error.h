@@ -50,6 +50,9 @@ public:
         return *this;
     }
 
+    /// True when the refusal can lift: a waiting code, or a refresh the server refused for a frozen app (its description names `app_suspended`).
+    bool waiting() const;
+
     /// True when a queued write that failed with this error must stay on the device and be sent again later: the
     /// same call can succeed, a refusal that can lift answered, or the credentials failed before the call.
     bool waitsForLater() const noexcept { return authLayer_ || retryable() || isWaitingCode(code_); }

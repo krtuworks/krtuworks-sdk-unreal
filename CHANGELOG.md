@@ -4,6 +4,14 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.14 - 2026-11-27
+
+### Fixed
+- A session whose open answered after the player left, was merged or was waiting for deletion is ended on the server. Before, it stayed open for 30 minutes and counted as live play and against the open-session limit.
+- Queued items wait 15 minutes only for a refusal that can lift (a frozen app, a merge, a ban, a module or build switched off). Before, any failed credential refresh waited that long, so a short outage delayed events, saves and reports by a quarter of an hour.
+- A failed session open is no longer retried while the build is switched off altogether (`ALL`).
+- Events refused because the app does not ship on the platform yet (`platform_not_registered`) are kept and sent again after the 15 minute wait, so they arrive once the platform is added. Before, the whole batch (up to 500 events) was dropped. The on-device limits (50 000 events, 20 MiB, 30 days) still apply.
+
 ## 1.0.13 - 2026-11-27
 
 ### Fixed

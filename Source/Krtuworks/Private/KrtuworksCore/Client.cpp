@@ -376,6 +376,13 @@ struct Client::Impl
         }
     }
 
+    /// Whether a session is wanted now: sessions on, the module on, the build not switched off altogether.
+    bool sessionsWanted() const
+    {
+        const auto off = config.switchForBuild();
+        return options.sessions && config.moduleOn("sessions") && !(off && off->mode == "ALL");
+    }
+
     /// The sessions switch as the config has it now, with no new build: on opens the player's session, off ends it.
     void applySessionsSwitch()
     {
@@ -774,7 +781,7 @@ struct Client::Impl
         });
         if (events.persistDue()) quietly([this] { events.persist(); });
         if (statMirror) quietly([this] { statMirror->store(false); });
-        if (options.sessions && config.moduleOn("sessions")) sessions.retryOpen();
+        if (sessionsWanted()) sessions.retryOpen();
         if (files.scheduledDue()) quietly([this] { sentSettings(files.sendScheduled(false)); });
         if (now >= flushSoonAt.load() || now - lastFlushAt.load() >= clientFlushMs) quietly([this] { flush(); });
         if (now - lastConfigAt.load() >= clientConfigMs)

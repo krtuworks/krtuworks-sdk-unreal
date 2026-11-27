@@ -459,7 +459,9 @@ std::string EventQueue::failed(const std::string& owner, const FrozenBatch& batc
     }
     // An error that came before the call (a refused refresh) or a refusal that can lift says nothing against the
     // batch: it stays frozen and goes again later.
-    if ((err.status() == 400 || err.status() == 413) && !err.waitsForLater())
+    // An app that does not ship on this platform yet keeps the batch too: the events arrive once the platform is added.
+    const bool notShippedYet = err.code() == "platform_not_registered";
+    if ((err.status() == 400 || err.status() == 413) && !err.waitsForLater() && !notShippedYet)
     {
         // The batch itself can never be taken: drop it rather than block every later event.
         auto lock = NamedLocks::take(key(owner));
@@ -472,7 +474,8 @@ std::string EventQueue::failed(const std::string& owner, const FrozenBatch& batc
         }
         return err.code();
     }
-    notBefore_.store(nowMs() + queueWaitMs(err, backoffMs_));
+    const bool longWait = notShippedYet && !err.retryAfter();
+    notBefore_.store(nowMs() + (longWait ? queueLongWaitMs : queueWaitMs(err, backoffMs_)));
     return err.code();
 }
 

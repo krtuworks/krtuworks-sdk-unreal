@@ -20,6 +20,14 @@ bool Error::isWaitingCode(const std::string& code) noexcept
            code == "module_disabled";
 }
 
+bool Error::waiting() const
+{
+    if (isWaitingCode(code_)) return true;
+    if (!authLayer_) return false;
+    const auto description = details_.getString("description");
+    return description && description->find("app_suspended") != std::string::npos;
+}
+
 void CancelToken::throwIfCancelled() const
 {
     if (cancelled()) throw Cancelled();

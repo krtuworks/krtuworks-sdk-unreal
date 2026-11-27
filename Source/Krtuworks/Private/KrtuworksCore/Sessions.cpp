@@ -176,7 +176,7 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
         throw;
     }
     const auto& session = answer.body()["session"];
-    if (!session.isObject() || subject_() != owner) return std::nullopt;
+    if (!session.isObject()) return std::nullopt;
     std::optional<SessionInfo> opened;
     bool late = false;
     {
@@ -185,7 +185,8 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
     }
     if (late)
     {
-        // Closed while the open was on its way (the SDK shut down, the player left): the server's session ends now.
+        // Closed while the open was on its way (the SDK shut down, the player left): the server's session ends now,
+        // whoever plays by the time the answer comes.
         const auto lateId = session.getString("id").value_or("");
         if (!lateId.empty())
         {
@@ -199,6 +200,7 @@ std::optional<SessionInfo> SessionKeeper::doOpen()
         }
         return std::nullopt;
     }
+    if (subject_() != owner) return std::nullopt;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         current_ = SessionInfo{session.getString("id").value_or(""), *owner, session.getString("startedAt").value_or(""), linkOf(answer.body()["platformLink"])};

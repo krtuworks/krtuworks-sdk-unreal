@@ -312,7 +312,7 @@ void Files::retryLater(const PendingUpload& upload, const Error& err)
     std::int64_t wait = filesRetryMs;
     if (err.retryAfter()) wait = static_cast<std::int64_t>(*err.retryAfter() * 1000);
     else if (err.status() == 429) wait = filesWriteLimitMs;
-    else if (Error::isWaitingCode(err.code()) || (err.authLayer() && !err.retryable())) wait = queueLongWaitMs;
+    else if (err.waiting()) wait = queueLongWaitMs;
     schedule(laneLock(upload), upload.uploadId, wait, false);
 }
 
