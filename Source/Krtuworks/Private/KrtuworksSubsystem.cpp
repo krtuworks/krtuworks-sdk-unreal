@@ -53,7 +53,7 @@ namespace
 		krtu::DeviceInfo Device;
 		Device.os = KrtuworksPlatform::OsName();
 		Device.osVersion = Clip(FPlatformMisc::GetOSVersion(), 40);
-		Device.model = Clip(FPlatformMisc::GetDeviceMakeAndModel(), 120);
+		Device.model = Clip(FPlatformMisc::GetDeviceMakeAndModel(), 80);
 		Device.gpu = Clip(FPlatformMisc::GetPrimaryGPUBrand(), 120);
 		const uint32 RamGb = FPlatformMemory::GetPhysicalGBRam();
 		if (RamGb > 0)
@@ -581,10 +581,12 @@ void UKrtuworksSubsystem::EnqueueWrite(TFunction<void(krtu::Client&)> Write)
 	{
 		return;
 	}
-	Writes->Launch(TEXT("KrtuworksWrite"), [Held, Write = MoveTemp(Write)]() {
+	// Who plays and the time are taken now: the pipe runs the write later, and a write made before a player switch stays with the first player.
+	const krtu::CallMoment Moment = Held->callMoment();
+	Writes->Launch(TEXT("KrtuworksWrite"), [Held, Moment, Write = MoveTemp(Write)]() {
 		try
 		{
-			Write(*Held);
+			Held->atMoment(Moment, [&Held, &Write]() { Write(*Held); });
 		}
 		catch (...)
 		{

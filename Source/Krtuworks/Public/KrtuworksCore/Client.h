@@ -39,6 +39,12 @@ public:
     // ── Who plays ────────────────────────────────────────────────────────
 
     std::optional<Player> player() const;
+    /// The moment of a call made now: the player and the time. A layer that runs the game's calls on another
+    /// thread takes it when the game calls and runs the call inside atMoment, so a write made before a player
+    /// switch stays with the first player and keeps the time it was made.
+    CallMoment callMoment() const;
+    /// Runs `call` (this thread's calls on this client) as of `moment`.
+    void atMoment(const CallMoment& moment, const std::function<void()>& call);
     const std::string& environment() const;
     /// GAME, MOBILE_APP, WEB_APP or DESKTOP_APP, from krtuworks-config.json.
     const std::string& appType() const;
@@ -156,7 +162,7 @@ public:
     /// The app's stats and achievements with the player's values (names in the SDK's locale where the app has them).
     ProgressView getProgress();
     /// Lines achievements up with the platform's (Steam): what the platform has is unlocked here, and what this
-    /// player has here is unlocked there. Runs once per launch on its own; call it after a platform sign-in.
+    /// player has here is unlocked there. Runs once per player and launch on its own; call it after a platform sign-in.
     PlatformSyncResult syncPlatformAchievements();
     /// The platform account (Steam) the open session proved and whether this player mirrors with it; empty when none was proved.
     std::optional<PlatformLink> platformLink() const;

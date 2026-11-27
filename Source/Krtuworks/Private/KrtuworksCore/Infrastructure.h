@@ -34,6 +34,20 @@ std::int64_t nowMs();
 /// `2026-10-29T10:00:00.000Z`.
 std::string isoFromMs(std::int64_t ms);
 std::string isoNow();
+/// The moment this thread's calls are bound to (Client::atMoment), or null.
+const CallMoment* boundMoment();
+/// Binds this thread's calls to a moment for its lifetime.
+class MomentScope
+{
+public:
+    explicit MomentScope(const CallMoment& moment);
+    ~MomentScope();
+    MomentScope(const MomentScope&) = delete;
+    MomentScope& operator=(const MomentScope&) = delete;
+
+private:
+    const CallMoment* before_;
+};
 /// An ISO 8601 time (a time without a zone is UTC) or an HTTP date (`Thu, 29 Oct 2026 10:00:00 GMT`), as
 /// milliseconds since 1970; nothing when the text is neither.
 std::optional<std::int64_t> parseTimeMs(std::string_view text);
@@ -65,6 +79,10 @@ bool contains(std::string_view text, std::string_view part);
 std::string trimSpace(const std::string& text);
 /// The text's length as the server counts it (JavaScript's: UTF-16 units; a character past U+FFFF is two).
 std::size_t utf16Length(const std::string& text);
+/// The first `count` UTF-16 units of the text, never cutting a character.
+std::string firstUnits(const std::string& text, std::size_t count);
+/// The device as the server takes it: text trimmed and cut to its limits (os 40, osVersion 40, model 80, gpu 120), empty parts and numbers out of range left out.
+DeviceInfo cleanDevice(const DeviceInfo& device);
 
 // ── JSON in a store ─────────────────────────────────────────────────────
 

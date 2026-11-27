@@ -37,23 +37,6 @@ std::string bugsCut(const std::string& text, std::size_t limit)
     return text.substr(0, end);
 }
 
-/// The first `count` UTF-16 units of `text`, never cutting a character.
-std::string bugsFirstUnits(const std::string& text, std::size_t count)
-{
-    std::size_t units = 0;
-    std::size_t i = 0;
-    while (i < text.size())
-    {
-        const auto b = static_cast<unsigned char>(text[i]);
-        const std::size_t width = b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
-        const std::size_t take = b >= 0xF0 ? 2 : 1;
-        if (units + take > count) break;
-        units += take;
-        i += width;
-    }
-    return text.substr(0, (std::min)(i, text.size()));
-}
-
 bool bugsFinite(double value)
 {
     return std::isfinite(value);
@@ -114,7 +97,7 @@ Json BugReports::reportBody(const BugReportInput& input, const std::string& repo
     const auto description = trimSpace(input.description);
     if (description.empty() || utf16Length(description) > bugsMaxDescription) throw std::invalid_argument("description is what the player wrote, 1-4000 characters");
     // The level the SDK saw is cut to fit; one the game names must fit.
-    const auto place = input.level ? input.level : (level ? std::optional<std::string>(bugsFirstUnits(*level, 200)) : std::nullopt);
+    const auto place = input.level ? input.level : (level ? std::optional<std::string>(firstUnits(*level, 200)) : std::nullopt);
     if (place && (trimSpace(*place).empty() || utf16Length(*place) > 200)) throw std::invalid_argument("level is 1-200 characters");
     const auto rate = input.fps ? input.fps : fps;
     if (rate && (!bugsFinite(*rate) || *rate < 0 || *rate > 1000)) throw std::invalid_argument("fps is a number from 0 to 1000");

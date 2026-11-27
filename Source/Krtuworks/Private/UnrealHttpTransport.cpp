@@ -47,6 +47,9 @@ krtu::HttpAnswer FUnrealHttpTransport::send(const krtu::HttpCall& Call)
 		Request->SetContent(KrtuworksConvert::ToArray(Call.body));
 	}
 	Request->SetTimeout(RequestTimeoutSeconds);
+	// Complete on the HTTP thread: the game thread may be waiting on this very call (quit waits for the session's end), and the
+	// default would queue the completion on the game thread, behind that wait.
+	Request->SetDelegateThreadPolicy(EHttpRequestDelegateThreadPolicy::CompleteOnHttpThread);
 	const std::shared_ptr<FHttpWait> Wait = std::make_shared<FHttpWait>();
 	Request->OnProcessRequestComplete().BindLambda([Wait](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnected) {
 		{

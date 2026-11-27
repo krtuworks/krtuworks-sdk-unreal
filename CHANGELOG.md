@@ -4,6 +4,15 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.17 - 2026-11-27
+
+### Fixed
+- Quitting the game now delivers the session end. The end is sent while the game thread waits for it, and the HTTP transport completed requests on the game thread, so the wait blocked the very completion it waited for. Requests now complete on the HTTP thread.
+- A write made before a player switch (a stat, achievement, score, level or death) stays with the player who made it and keeps the time it was made. Before, the write pipe read the player and the time when it ran, so a write made just before the switch could be filed under the next player.
+- The device model is cut to 80 characters, the most the server takes (it was 120): a longer model made every session open and every bug report be refused as a bad request. The core now also trims and cuts every device part and the language tag to the server's limits.
+- The next player on Steam has their achievements lined up with Steam as well. Before, the lining up ran once per launch.
+- A stat Steam refuses is asked about again after 5 minutes. Before, it was left alone until the game restarted.
+
 ## 1.0.16 - 2026-11-27
 
 ### Changed

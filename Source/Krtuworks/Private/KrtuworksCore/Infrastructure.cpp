@@ -294,6 +294,73 @@ std::size_t utf16Length(const std::string& text)
     return units;
 }
 
+namespace
+{
+thread_local const CallMoment* boundCall = nullptr;
+}
+
+const CallMoment* boundMoment()
+{
+    return boundCall;
+}
+
+MomentScope::MomentScope(const CallMoment& moment) : before_(boundCall)
+{
+    boundCall = &moment;
+}
+
+MomentScope::~MomentScope()
+{
+    boundCall = before_;
+}
+
+std::string firstUnits(const std::string& text, std::size_t count)
+{
+    std::size_t units = 0;
+    std::size_t i = 0;
+    while (i < text.size())
+    {
+        const auto b = static_cast<unsigned char>(text[i]);
+        const std::size_t width = b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
+        const std::size_t take = b >= 0xF0 ? 2 : 1;
+        if (units + take > count) break;
+        units += take;
+        i += width;
+    }
+    return text.substr(0, (std::min)(i, text.size()));
+}
+
+namespace
+{
+std::optional<std::string> deviceText(const std::optional<std::string>& value, std::size_t max)
+{
+    if (!value) return std::nullopt;
+    auto text = firstUnits(trimSpace(*value), max);
+    text = trimSpace(text);
+    if (text.empty()) return std::nullopt;
+    return text;
+}
+
+std::optional<int> deviceNumber(const std::optional<int>& value, int max)
+{
+    if (!value || *value < 1 || *value > max) return std::nullopt;
+    return value;
+}
+}  // namespace
+
+DeviceInfo cleanDevice(const DeviceInfo& device)
+{
+    DeviceInfo clean;
+    clean.os = deviceText(device.os, 40);
+    clean.osVersion = deviceText(device.osVersion, 40);
+    clean.model = deviceText(device.model, 80);
+    clean.gpu = deviceText(device.gpu, 120);
+    clean.ramMb = deviceNumber(device.ramMb, 10000000);
+    clean.screenWidth = deviceNumber(device.screenWidth, 100000);
+    clean.screenHeight = deviceNumber(device.screenHeight, 100000);
+    return clean;
+}
+
 // ── JSON in a store ─────────────────────────────────────────────────────
 
 std::optional<Json> getJson(KeyValueStore& store, const std::string& key)
@@ -536,8 +603,8 @@ Resolved Resolved::from(const Options& o)
     r.devOrigin = o.devOrigin;
     while (!r.devOrigin.empty() && r.devOrigin.back() == '/') r.devOrigin.pop_back();
     r.issuer = r.idOrigin + "/oidc";
-    r.device = o.device;
-    r.locale = o.locale;
+    if (o.device) r.device = cleanDevice(*o.device);
+    r.locale = deviceText(o.locale, 35);
     r.sessions = o.sessions;
     r.positionSampleSeconds = o.positionSampleSeconds;
     r.delay = o.delay ? o.delay : [](std::chrono::milliseconds duration, const CancelToken& cancel) { sleepFor(duration, cancel); };

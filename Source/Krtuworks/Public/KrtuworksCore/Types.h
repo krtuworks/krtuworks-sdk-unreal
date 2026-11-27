@@ -48,6 +48,14 @@ struct KRTU_API AppConfig
     static AppConfig fromJson(std::string_view text);
 };
 
+/// What a call of the game means at the moment it is made: who plays and what time it is.
+struct KRTU_API CallMoment
+{
+    std::optional<std::string> subject;
+    std::string createdAt;
+    std::int64_t monotonicMs = 0;
+};
+
 /// What the session tells about the device; only the known fields are sent.
 struct KRTU_API DeviceInfo
 {

@@ -128,9 +128,10 @@ WireEvent EventQueue::add(const std::string& type, const std::optional<Json>& da
     WireEvent made;
     made.id = uuidV7();
     made.type = type;
-    made.createdAt = isoNow();
+    const auto* moment = boundMoment();
+    made.createdAt = moment ? moment->createdAt : isoNow();
     made.launchId = clock_.launchId();
-    made.monotonicMs = clock_.monotonicMs();
+    made.monotonicMs = moment ? moment->monotonicMs : clock_.monotonicMs();
     made.serverOffsetMs = clock_.serverOffsetMs();
     made.sessionId = sessionId;
     made.schemaVersion = schemaVersion;

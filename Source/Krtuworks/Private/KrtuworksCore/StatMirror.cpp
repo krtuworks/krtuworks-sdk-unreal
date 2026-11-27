@@ -24,7 +24,11 @@ double StatMirror::platformValue(const std::string& type, double value)
 bool StatMirror::isRefused(const std::string& id)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return refused_.count(id) != 0;
+    const auto found = refused_.find(id);
+    if (found == refused_.end()) return false;
+    if (nowMs_() - found->second < refusedForMs) return true;
+    refused_.erase(found);
+    return false;
 }
 
 std::optional<double> StatMirror::read(const StatPlatformId& stat)
@@ -41,7 +45,7 @@ void StatMirror::set(const StatPlatformId& stat, double serverValue)
     if (took)
         dirty_ = true;
     else
-        refused_.insert(stat.id);
+        refused_[stat.id] = nowMs_();
 }
 
 void StatMirror::store(bool force)

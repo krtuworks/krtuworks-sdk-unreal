@@ -4,7 +4,7 @@
 #include <functional>
 #include <mutex>
 #include <optional>
-#include <set>
+#include <map>
 #include <string>
 
 #include "KrtuworksCore/Types.h"
@@ -22,11 +22,13 @@ struct StatPlatformId
 /// The stats mirror on the platform (Steam sync, stats). The server is the record: the platform is set to the
 /// server's value as soon as the server has it (never an increase, so nothing counts twice), and the
 /// platform's servers get the values at most every 2 minutes, on pause and on exit. A stat the platform refuses
-/// (not published there, another type) is left alone for the session. Any thread.
+/// (not published there, another type) is left alone for 5 minutes, then tried again (a stat published since is then
+/// mirrored); the rounds in between do not ask the platform again. Any thread.
 class StatMirror
 {
 public:
     static constexpr std::int64_t storeEveryMs = 120000;
+    static constexpr std::int64_t refusedForMs = 300000;
 
     StatMirror(PlatformStats& platform, std::function<std::int64_t()> nowMs);
 
@@ -47,7 +49,7 @@ private:
     PlatformStats& platform_;
     std::function<std::int64_t()> nowMs_;
     std::mutex mutex_;
-    std::set<std::string> refused_;
+    std::map<std::string, std::int64_t> refused_;
     bool dirty_ = false;
     std::optional<std::int64_t> lastStoreAt_;
 };

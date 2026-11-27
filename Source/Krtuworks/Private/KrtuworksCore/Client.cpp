@@ -160,6 +160,7 @@ struct Client::Impl
 
     std::optional<std::string> subject() const
     {
+        if (const auto* moment = boundMoment()) return moment->subject;
         const auto current = identity.player();
         if (!current) return std::nullopt;
         return current->subject;
@@ -232,6 +233,7 @@ struct Client::Impl
         }
         optedOut.store(false);
         positions.reset();
+        platformSynced.store(false);
     }
 
     Player signInAsGuest(const std::optional<std::string>& birthDate, const std::optional<std::string>& acceptedTerms)
@@ -270,7 +272,7 @@ struct Client::Impl
         if (gamePlatform() != nullptr) quietly([this] { settlePlatformLink(); });
     }
 
-    /// The session's platform account: mirrored, the achievements line up once per launch; waiting for the
+    /// The session's platform account: mirrored, the achievements line up once per player and launch; waiting for the
     /// player's answer, a third account or another Krtuworks ID's, the game is told. Anything else (refused,
     /// none proved) mirrors nothing, so nothing is sent.
     void settlePlatformLink()
@@ -911,6 +913,21 @@ std::unique_ptr<Client> Client::initialize(Options options)
 std::optional<Player> Client::player() const
 {
     return impl_->identity.player();
+}
+
+CallMoment Client::callMoment() const
+{
+    CallMoment moment;
+    moment.subject = impl_->subject();
+    moment.createdAt = detail::isoNow();
+    moment.monotonicMs = impl_->clock.monotonicMs();
+    return moment;
+}
+
+void Client::atMoment(const CallMoment& moment, const std::function<void()>& call)
+{
+    const detail::MomentScope scope(moment);
+    call();
 }
 
 const std::string& Client::environment() const
