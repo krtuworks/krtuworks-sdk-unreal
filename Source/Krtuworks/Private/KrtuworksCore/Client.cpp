@@ -387,10 +387,11 @@ struct Client::Impl
     void applySessionsSwitch()
     {
         if (!options.sessions || stopping.load()) return;
-        const bool on = config.moduleOn("sessions");
+        const bool on = sessionsWanted();
         // A failed open is asked again by the tick once its wait is over.
         if (on && identity.player() && !sessions.session() && !sessions.openFailed()) quietly([this] { sessions.open(); });
-        else if (!on && sessions.session()) sessions.end();
+        // Off ends the session, and also an open still on its way and a retry waiting: nothing opens or beats after it.
+        else if (!on) sessions.end();
     }
 
     /// An account that is gone: nothing of it is sent again.

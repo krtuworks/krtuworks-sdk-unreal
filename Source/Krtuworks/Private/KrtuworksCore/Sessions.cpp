@@ -80,6 +80,11 @@ std::optional<SessionInfo> SessionKeeper::open()
 
 std::optional<SessionInfo> SessionKeeper::openOnce()
 {
+    std::uint64_t startedIn = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        startedIn = generation_;
+    }
     try
     {
         auto opened = doOpen();
@@ -93,6 +98,8 @@ std::optional<SessionInfo> SessionKeeper::openOnce()
         // Whatever the reason, the session is asked for again later: never given up for the rest of the run.
         const auto wait = queueWaitMs(err, openBackoffMs_);
         std::lock_guard<std::mutex> lock(mutex_);
+        // A close since this open began ended the wish for a session: no retry waits for it.
+        if (generation_ != startedIn) throw;
         openFailed_ = true;
         openNotBeforeMs_ = elapsedMs() + wait;
         throw;

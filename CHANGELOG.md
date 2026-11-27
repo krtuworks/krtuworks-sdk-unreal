@@ -4,6 +4,12 @@ All notable changes to the Krtuworks plugin for Unreal Engine. Versions follow s
 
 ## Unreleased
 
+## 1.0.15 - 2026-11-27
+
+### Fixed
+- Switching the `sessions` module off, or the build off altogether (`ALL`), while the session open is still on its way now ends the session the late answer names and sends no heartbeat. Before, the late answer opened the session and it kept its heartbeats until a later config read. A failed open waiting for its retry stops as well.
+- Switching the build off altogether (`ALL`) now also ends an open session at the next config read, as switching the `sessions` module off does.
+
 ## 1.0.14 - 2026-11-27
 
 ### Fixed
