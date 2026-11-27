@@ -36,6 +36,8 @@ public:
     /// Opens the session again when the last open failed (offline, a busy server, a refusal that can lift) and its
     /// wait is over; never throws. The client's tick calls it.
     void retryOpen();
+    /// The last open failed: retryOpen asks again once its wait is over.
+    bool openFailed() const;
     /// The network is back or the player changed: the next retryOpen tries at once.
     void resetOpenBackoff();
     /// The server's `platformLink` (the session open's, the consent answer's); empty when it is not one.

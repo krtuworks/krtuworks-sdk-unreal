@@ -366,6 +366,7 @@ struct Client::Impl
         {
             const auto changed = config.refresh();
             firstLaunchOffline.store(false);
+            applySessionsSwitch();
             return changed;
         }
         catch (const Error&)
@@ -373,6 +374,16 @@ struct Client::Impl
             if (options.firstLaunchOnline && !config.hasCopy() && !identity.player()) firstLaunchOffline.store(true);
             throw;
         }
+    }
+
+    /// The sessions switch as the config has it now, with no new build: on opens the player's session, off ends it.
+    void applySessionsSwitch()
+    {
+        if (!options.sessions || stopping.load()) return;
+        const bool on = config.moduleOn("sessions");
+        // A failed open is asked again by the tick once its wait is over.
+        if (on && identity.player() && !sessions.session() && !sessions.openFailed()) quietly([this] { sessions.open(); });
+        else if (!on && sessions.session()) sessions.end();
     }
 
     /// An account that is gone: nothing of it is sent again.

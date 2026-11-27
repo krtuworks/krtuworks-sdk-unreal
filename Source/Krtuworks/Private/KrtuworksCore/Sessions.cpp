@@ -118,6 +118,12 @@ void SessionKeeper::retryOpen()
     }
 }
 
+bool SessionKeeper::openFailed() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return openFailed_;
+}
+
 void SessionKeeper::resetOpenBackoff()
 {
     std::lock_guard<std::mutex> lock(mutex_);
